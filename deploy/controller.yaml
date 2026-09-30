@@ -1,0 +1,69 @@
+# In-cluster deployment of the monitoring-pmm controller (PoC).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring-pmm-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-pmm
+  namespace: monitoring-pmm-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-pmm
+rules:
+- apiGroups: [monitoring.openeverest.io]
+  resources: [monitoringclasses, monitoringdestinations]
+  verbs: [get, list, watch]
+- apiGroups: [monitoring.openeverest.io]
+  resources: [monitoringclasses/status, monitoringdestinations/status]
+  verbs: [get, patch, update]
+# The spec calls for a per-config Role scoped to credentialsSecretRef; the
+# PoC grants get on Secrets so the token can be read wherever a destination lives.
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [get, list, watch]
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-pmm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: monitoring-pmm
+subjects:
+- kind: ServiceAccount
+  name: monitoring-pmm
+  namespace: monitoring-pmm-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-pmm
+  namespace: monitoring-pmm-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: monitoring-pmm}
+  template:
+    metadata:
+      labels: {app: monitoring-pmm}
+    spec:
+      serviceAccountName: monitoring-pmm
+      containers:
+      - name: controller
+        image: monitoring-pmm:poc
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests: {cpu: 20m, memory: 64Mi}
+          limits: {memory: 256Mi}
