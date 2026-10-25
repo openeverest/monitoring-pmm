@@ -14,8 +14,8 @@
 
 // Command monitoring-pmm is the ProviderManaged MonitoringClass controller for
 // Percona Monitoring and Management: it claims the pmm class and keeps every
-// pmm MonitoringDestination's Ready condition and serverVersion current. Rendering
-// pmm-client into the engine pods is done by the providers.
+// pmm MonitoringDestination's Ready condition and serverVersion current.
+// Rendering pmm-client into the engine pods is done by the providers.
 package main
 
 import (
@@ -41,7 +41,7 @@ func main() {
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "Metrics endpoint bind address ('0' disables it).")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint bind address.")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election; the lease is named after the controller.")
-	opts := zap.Options{Development: true}
+	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
