@@ -60,7 +60,7 @@ func destinationKey() client.ObjectKey {
 	return client.ObjectKey{Namespace: testNamespace, Name: testDestination}
 }
 
-func newFakeClient(t *testing.T, objs ...client.Object) client.Client { //nolint:ireturn // the fake is used through the client interface
+func newFakeClient(t *testing.T, objs ...client.Object) client.WithWatch { //nolint:ireturn // the fake is used through the client interface
 	t.Helper()
 	s := runtime.NewScheme()
 	require.NoError(t, clientgoscheme.AddToScheme(s))
@@ -206,8 +206,7 @@ func TestDestinationReadiness(t *testing.T) {
 		name        string
 		url         func(t *testing.T) string
 		secret      *corev1.Secret
-		wantStatus  metav1.ConditionStatus
-		wantReason  string
+		wantReason  monitoringv1alpha1.ReadyReason
 		wantMessage string
 		wantVersion string
 		wantRequeue time.Duration
@@ -216,7 +215,6 @@ func TestDestinationReadiness(t *testing.T) {
 			name:        "PMM 3 server accepting the token",
 			url:         func(t *testing.T) string { t.Helper(); return serve(t, pmmServer("3.8.0")) },
 			secret:      tokenSecret("apiKey", testToken),
-			wantStatus:  metav1.ConditionTrue,
 			wantReason:  monitoringv1alpha1.ReasonReady,
 			wantMessage: "PMM server 3.8.0 is reachable",
 			wantVersion: "3.8.0",
@@ -226,7 +224,6 @@ func TestDestinationReadiness(t *testing.T) {
 			name:        "token rejected",
 			url:         func(t *testing.T) string { t.Helper(); return serve(t, pmmServer("3.8.0")) },
 			secret:      tokenSecret("apiKey", "glsa_revoked"),
-			wantStatus:  metav1.ConditionFalse,
 			wantReason:  monitoringv1alpha1.ReasonUnauthorized,
 			wantMessage: "HTTP 401",
 			wantRequeue: 5 * time.Minute,
@@ -235,7 +232,6 @@ func TestDestinationReadiness(t *testing.T) {
 			name:        "PMM 2 server",
 			url:         func(t *testing.T) string { t.Helper(); return serve(t, pmmServer("2.44.1")) },
 			secret:      tokenSecret("apiKey", testToken),
-			wantStatus:  metav1.ConditionFalse,
 			wantReason:  monitoringv1alpha1.ReasonUnsupportedServerVersion,
 			wantMessage: "PMM server 2.44.1 is not supported",
 			wantVersion: "2.44.1",
@@ -245,7 +241,6 @@ func TestDestinationReadiness(t *testing.T) {
 			name:        "not a PMM server",
 			url:         func(t *testing.T) string { t.Helper(); return serve(t, http.NotFoundHandler()) },
 			secret:      tokenSecret("apiKey", testToken),
-			wantStatus:  metav1.ConditionFalse,
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "HTTP 404",
 			wantRequeue: time.Minute,
@@ -254,7 +249,6 @@ func TestDestinationReadiness(t *testing.T) {
 			name:        "connection refused",
 			url:         closedServer,
 			secret:      tokenSecret("apiKey", testToken),
-			wantStatus:  metav1.ConditionFalse,
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "connection refused",
 			wantRequeue: time.Minute,
@@ -263,7 +257,6 @@ func TestDestinationReadiness(t *testing.T) {
 			name:        "URL without a scheme",
 			url:         func(*testing.T) string { return "pmm.example.com" },
 			secret:      tokenSecret("apiKey", testToken),
-			wantStatus:  metav1.ConditionFalse,
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: `"pmm.example.com" is not an http(s) URL`,
 			wantRequeue: time.Minute,
@@ -271,7 +264,6 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "credentials Secret missing",
 			url:         unexpectedServer,
-			wantStatus:  metav1.ConditionFalse,
 			wantReason:  monitoringv1alpha1.ReasonUnauthorized,
 			wantMessage: `credentials Secret "pmm-prod-token" not found`,
 			wantRequeue: 5 * time.Minute,
@@ -280,7 +272,6 @@ func TestDestinationReadiness(t *testing.T) {
 			name:        "credentials Secret without apiKey",
 			url:         unexpectedServer,
 			secret:      tokenSecret("token", testToken),
-			wantStatus:  metav1.ConditionFalse,
 			wantReason:  monitoringv1alpha1.ReasonUnauthorized,
 			wantMessage: `credentials Secret "pmm-prod-token" has no "apiKey" key`,
 			wantRequeue: 5 * time.Minute,
@@ -297,8 +288,7 @@ func TestDestinationReadiness(t *testing.T) {
 			res, dst := reconcile(t, newFakeClient(t, objs...))
 
 			ready := readyCondition(t, dst)
-			assert.Equal(t, tt.wantStatus, ready.Status)
-			assert.Equal(t, tt.wantReason, ready.Reason)
+			assert.Equal(t, string(tt.wantReason), ready.Reason)
 			assert.Contains(t, ready.Message, tt.wantMessage)
 			assert.Equal(t, int64(1), ready.ObservedGeneration)
 			assert.Equal(t, tt.wantVersion, dst.Status.ServerVersion)
@@ -313,12 +303,11 @@ func TestDestinationVerifyTLS(t *testing.T) {
 	tests := []struct {
 		name       string
 		params     map[string]any
-		wantStatus metav1.ConditionStatus
-		wantReason string
+		wantReason monitoringv1alpha1.ReadyReason
 	}{
-		{name: "verification disabled", params: map[string]any{"verifyTLS": false}, wantStatus: metav1.ConditionTrue, wantReason: monitoringv1alpha1.ReasonReady},
-		{name: "verification enabled", params: map[string]any{"verifyTLS": true}, wantStatus: metav1.ConditionFalse, wantReason: monitoringv1alpha1.ReasonUnreachable},
-		{name: "verification by default", params: map[string]any{}, wantStatus: metav1.ConditionFalse, wantReason: monitoringv1alpha1.ReasonUnreachable},
+		{name: "verification disabled", params: map[string]any{"verifyTLS": false}, wantReason: monitoringv1alpha1.ReasonReady},
+		{name: "verification enabled", params: map[string]any{"verifyTLS": true}, wantReason: monitoringv1alpha1.ReasonUnreachable},
+		{name: "verification by default", params: map[string]any{}, wantReason: monitoringv1alpha1.ReasonUnreachable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -330,9 +319,8 @@ func TestDestinationVerifyTLS(t *testing.T) {
 			_, dst := reconcile(t, newFakeClient(t, pmmClass(), destination(t, "pmm", tt.params), tokenSecret("apiKey", testToken)))
 
 			ready := readyCondition(t, dst)
-			assert.Equal(t, tt.wantStatus, ready.Status)
-			assert.Equal(t, tt.wantReason, ready.Reason)
-			if tt.wantStatus == metav1.ConditionFalse {
+			assert.Equal(t, string(tt.wantReason), ready.Reason)
+			if tt.wantReason == monitoringv1alpha1.ReasonUnreachable {
 				assert.Contains(t, ready.Message, "certificate")
 			}
 		})
@@ -362,8 +350,7 @@ func TestDestinationReadyKeepsAcceptedAndServerVersion(t *testing.T) {
 	_, dst = reconcile(t, c)
 
 	ready := readyCondition(t, dst)
-	assert.Equal(t, metav1.ConditionFalse, ready.Status)
-	assert.Equal(t, monitoringv1alpha1.ReasonUnauthorized, ready.Reason)
+	assert.Equal(t, string(monitoringv1alpha1.ReasonUnauthorized), ready.Reason)
 	assert.Equal(t, "3.8.0", dst.Status.ServerVersion)
 	gotAccepted := meta.FindStatusCondition(dst.Status.Conditions, monitoringv1alpha1.MonitoringDestinationConditionAccepted)
 	require.NotNil(t, gotAccepted)

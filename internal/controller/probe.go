@@ -26,8 +26,6 @@ import (
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	monitoringv1alpha1 "github.com/openeverest/openeverest/v2/api/monitoring/v1alpha1"
 )
 
@@ -101,14 +99,12 @@ func probe(ctx context.Context, httpClient *http.Client, endpoint, token string)
 	}
 	if major, _, _ := strings.Cut(body.Version, "."); major != supportedMajor {
 		return readiness{
-			status:  metav1.ConditionFalse,
 			reason:  monitoringv1alpha1.ReasonUnsupportedServerVersion,
 			message: fmt.Sprintf("PMM server %s is not supported; the pmm class supports PMM 3 only", body.Version),
 			version: body.Version,
 		}
 	}
 	return readiness{
-		status:  metav1.ConditionTrue,
 		reason:  monitoringv1alpha1.ReasonReady,
 		message: fmt.Sprintf("PMM server %s is reachable and accepts the token", body.Version),
 		version: body.Version,

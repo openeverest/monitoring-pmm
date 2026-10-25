@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -54,8 +53,7 @@ type destinationParameters struct {
 
 // readiness is the Ready condition and serverVersion of a destination.
 type readiness struct {
-	status  metav1.ConditionStatus
-	reason  string
+	reason  monitoringv1alpha1.ReadyReason
 	message string
 	version string
 }
@@ -111,7 +109,7 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.classes.SetDestinationReady(ctx, dst, ready.status, ready.reason, ready.message, ready.version); err != nil {
+	if err := r.classes.SetDestinationReady(ctx, dst, ready.reason, ready.message, ready.version); err != nil {
 		return ctrl.Result{}, err
 	}
 	if ready.reason == monitoringv1alpha1.ReasonUnreachable {
@@ -193,9 +191,9 @@ func (r *DestinationReconciler) enqueue(ctx context.Context, match func(*monitor
 }
 
 func unreachable(message string) readiness {
-	return readiness{status: metav1.ConditionFalse, reason: monitoringv1alpha1.ReasonUnreachable, message: message}
+	return readiness{reason: monitoringv1alpha1.ReasonUnreachable, message: message}
 }
 
 func unauthorized(message string) readiness {
-	return readiness{status: metav1.ConditionFalse, reason: monitoringv1alpha1.ReasonUnauthorized, message: message}
+	return readiness{reason: monitoringv1alpha1.ReasonUnauthorized, message: message}
 }

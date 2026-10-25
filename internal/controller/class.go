@@ -54,10 +54,14 @@ func (r *ClassReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// Reconcile claims every class naming this controller.
-func (r *ClassReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
-	_, err := r.classes.Claim(ctx)
-	return ctrl.Result{}, err
+// Reconcile claims the class if it names this controller; a failed claim is
+// retried with backoff.
+func (r *ClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	class := &monitoringv1alpha1.MonitoringClass{}
+	if err := r.classes.Client.Get(ctx, req.NamespacedName, class); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	return ctrl.Result{}, r.classes.ClaimClass(ctx, class)
 }
 
 // Setup registers both controllers with the manager.
