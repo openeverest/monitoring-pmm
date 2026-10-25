@@ -50,8 +50,8 @@ help: ## Display this help.
 lint: ## Run golangci-lint.
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
 
-.PHONY: test
-test: ## Run Go unit tests.
+.PHONY: test-unit
+test-unit: ## Run Go unit tests.
 	go test -race -coverprofile=coverage.out ./...
 
 .PHONY: run
