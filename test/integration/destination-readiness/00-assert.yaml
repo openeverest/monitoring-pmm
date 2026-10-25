@@ -1,0 +1,33 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-pmm
+status:
+  readyReplicas: 1
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  labels:
+    kubernetes.io/service-name: fake-pmm
+endpoints:
+  - conditions:
+      ready: true
+---
+# The chart's class, carrying the required agent values and claimed by the
+# controller.
+apiVersion: monitoring.openeverest.io/v1alpha1
+kind: MonitoringClass
+metadata:
+  name: pmm
+spec:
+  controllerName: openeverest.io/monitoring-pmm
+  providerManaged:
+    integration: pmm
+    agentImage: percona/pmm-client:3.8.0
+    agentVersion: 3.8.0
+status:
+  (conditions[?type == 'Accepted']):
+    - status: "True"
+      reason: Accepted

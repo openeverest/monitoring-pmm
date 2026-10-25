@@ -1,0 +1,10 @@
+---
+apiVersion: monitoring.openeverest.io/v1alpha1
+kind: MonitoringDestination
+metadata:
+  name: pmm-it
+status:
+  serverVersion: 3.8.0
+  (conditions[?type == 'Ready']):
+    - status: "True"
+      reason: Ready

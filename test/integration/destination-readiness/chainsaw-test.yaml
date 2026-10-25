@@ -1,0 +1,62 @@
+---
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: destination-readiness
+spec:
+  description: |
+    monitoring-pmm (installed by the chart in openeverest-system) claims the pmm
+    class and reports the Ready condition and serverVersion of pmm destinations
+    by probing a fake PMM server: nginx answering the version API as PMM 3.8.0
+    on port 8080 (one token accepted) and as PMM 2.44.1 on port 8081. A
+    destination whose Service does not exist is Unreachable. Core's controllers
+    do not run here, so destinations never get Accepted.
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get monitoringdestination,deployment,pod -o yaml
+    - script:
+        content: kubectl get monitoringclass -o yaml
+    - podLogs:
+        namespace: openeverest-system
+        selector: app.kubernetes.io/name=monitoring-pmm
+        tail: 100
+  steps:
+    - name: fake-pmm-server
+      try:
+        - apply:
+            file: 00-fake-pmm.yaml
+        - assert:
+            timeout: 3m
+            file: 00-assert.yaml
+
+    # A first probe that races the Service routing is retried after a minute.
+    - name: destination-ready
+      try:
+        - apply:
+            file: 10-destination.yaml
+        - assert:
+            timeout: 2m
+            file: 10-assert.yaml
+
+    # Rotating the Secret to a token the server rejects is picked up through
+    # the Secret watch; the last known serverVersion is kept.
+    - name: token-rejected
+      try:
+        - apply:
+            file: 20-wrong-token.yaml
+        - assert:
+            file: 20-assert.yaml
+
+    - name: pmm2-unsupported
+      try:
+        - apply:
+            file: 30-pmm2-destination.yaml
+        - assert:
+            file: 30-assert.yaml
+
+    - name: server-unreachable
+      try:
+        - apply:
+            file: 40-unreachable-destination.yaml
+        - assert:
+            file: 40-assert.yaml

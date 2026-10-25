@@ -13,9 +13,15 @@ IMG ?= ghcr.io/openeverest/monitoring-pmm-dev:latest
 _IMG_REPO = $(firstword $(subst :, ,$(IMG)))
 _IMG_TAG  = $(lastword $(subst :, ,$(IMG)))
 
-# Branch or commit of openeverest/openeverest the integration tests install
-# the monitoring CRDs from. Tracks the core API go.mod is pinned to.
-OPENEVEREST_REF ?= monitoring/01-api
+# Branch of openeverest/openeverest the integration tests install the CRDs
+# from. Tracks the core API go.mod is pinned to; flip to main once the
+# monitoring API is merged there.
+OPENEVEREST_BRANCH ?= monitoring/01-api
+_CRD_BASE = https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_BRANCH)/config/crd/bases
+
+# pmm-client image and version the integration tests install the class with
+AGENT_IMAGE ?= percona/pmm-client:3.8.0
+AGENT_VERSION ?= 3.8.0
 
 # Helm chart directory
 CHART_DIR ?= charts/monitoring-pmm
@@ -116,14 +122,18 @@ load-image: ## Import IMG into the k3d cluster.
 	k3d image import $(IMG) -c $(K3D_CLUSTER_NAME)
 
 .PHONY: install-crds
-install-crds: ## Install the OpenEverest monitoring CRDs.
-	kubectl apply --server-side -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_REF)/config/crd/bases/monitoring.openeverest.io_monitoringclasses.yaml
-	kubectl apply --server-side -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_REF)/config/crd/bases/monitoring.openeverest.io_monitoringdestinations.yaml
-	kubectl apply --server-side -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_REF)/config/crd/bases/monitoring.openeverest.io_monitoringbindings.yaml
+install-crds: ## Install the OpenEverest CRDs from OPENEVEREST_BRANCH.
+	kubectl apply --server-side -f $(_CRD_BASE)/monitoring.openeverest.io_monitoringclasses.yaml
+	kubectl apply --server-side -f $(_CRD_BASE)/monitoring.openeverest.io_monitoringdestinations.yaml
+	kubectl apply --server-side -f $(_CRD_BASE)/monitoring.openeverest.io_monitoringbindings.yaml
+	kubectl apply --server-side -f $(_CRD_BASE)/core.openeverest.io_providers.yaml
+	kubectl apply --server-side -f $(_CRD_BASE)/core.openeverest.io_instances.yaml
 	kubectl wait --for=condition=Established --timeout=60s \
 		crd/monitoringclasses.monitoring.openeverest.io \
 		crd/monitoringdestinations.monitoring.openeverest.io \
-		crd/monitoringbindings.monitoring.openeverest.io
+		crd/monitoringbindings.monitoring.openeverest.io \
+		crd/providers.core.openeverest.io \
+		crd/instances.core.openeverest.io
 
 .PHONY: deploy-ci
 deploy-ci: ## Install the chart with IMG (already imported into k3d).
@@ -133,6 +143,8 @@ deploy-ci: ## Install the chart with IMG (already imported into k3d).
 		--set image.repository=$(_IMG_REPO) \
 		--set image.tag=$(_IMG_TAG) \
 		--set image.pullPolicy=Never \
+		--set class.agentImage=$(AGENT_IMAGE) \
+		--set class.agentVersion=$(AGENT_VERSION) \
 		--wait --timeout 2m
 
 .PHONY: test-integration

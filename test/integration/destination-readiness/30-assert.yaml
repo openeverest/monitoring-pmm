@@ -1,0 +1,10 @@
+---
+apiVersion: monitoring.openeverest.io/v1alpha1
+kind: MonitoringDestination
+metadata:
+  name: pmm2-it
+status:
+  serverVersion: 2.44.1
+  (conditions[?type == 'Ready']):
+    - status: "False"
+      reason: UnsupportedServerVersion
