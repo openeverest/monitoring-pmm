@@ -19,9 +19,11 @@ It installs the `pmm` `MonitoringClass` and its controller. Instances whose prov
 
 `pmm` is a **ProviderManaged** class: the database provider renders the engine operator's native PMM integration itself, so nothing in this repository touches database pods. This controller only validates the PMM server and token behind each destination and, through the class, owns the pmm-client image the providers run.
 
-- **This controller** claims every `MonitoringClass` whose `spec.controllerName` is `openeverest.io/monitoring-pmm` (sets `Accepted=True`) and keeps the `Ready` condition and `status.serverVersion` of every destination of that class current by calling the PMM server's version API and its settings API, which only the Admin role reads, with the destination's token. It re-checks a `Ready` destination every 5 minutes. A failing one is re-checked after as long as it has been failing, at least every minute and at most every 5 minutes. Those periodic checks also pick up a rotated token; a change to the destination or the class re-checks it immediately.
+- **This controller** claims the `MonitoringClass` named by the chart value `class.name` if its `spec.controllerName` is `openeverest.io/monitoring-pmm` (sets `Accepted=True`); another class naming the controller is logged and left unclaimed. It keeps the `Ready` condition and `status.serverVersion` of every destination of that class current by calling the PMM server's version API and its settings API, which only the Admin role reads, with the destination's token. It re-checks a `Ready` destination every 5 minutes. A failing one is re-checked after as long as it has been failing, at least every minute and at most every 5 minutes. Those periodic checks also pick up a rotated token; a change to the destination or the class re-checks it immediately.
 - **The provider** renders pmm-client for every Instance entry that points at a `pmm` destination: the image is the class's `agentImage`, the server is the destination's `url`, the token is copied from the destination Secret into the secret the Percona operator reads it from, and the container resources are the Instance size tier merged with the entry's `parameters.resources`. The Percona operator then runs pmm-client as a sidecar of the database pods, which registers them with PMM (metrics and Query Analytics). Adding, removing or changing the agent restarts the database pods one at a time.
 - **provider-runtime** reports whether that worked on the `MonitoringBinding` (`Configured`) and in the Instance's `MonitoringConfigured` condition.
+
+The controller writes the class's `Accepted` condition and each destination's `Ready` condition and `status.serverVersion`, and nothing else: it creates no objects and never writes a binding, an Instance or a Secret.
 
 PMM 3 only: a PMM 2 server is reported as `UnsupportedServerVersion`.
 
@@ -48,7 +50,7 @@ OpenEverest pre-installs no monitoring backend: the `pmm` class exists once this
 
 ### 1. Create a PMM 3 service-account token
 
-The providers register database nodes and services with PMM using this token, so the service account needs the **Admin** role.
+The providers register database nodes and services with PMM using this token, so the service account needs the **Admin** role. The controller checks it: a token without the Admin role, such as a Viewer token, leaves the destination `Ready=False` with reason `Unauthorized`.
 
 In the PMM UI: **Administration → Users and access → Service accounts → Add service account**, choose the Admin role, then **Add service account token** and copy the token (it starts with `glsa_`).
 
@@ -136,14 +138,28 @@ spec:
 | `Ready` | True | PMM 3 answered with its version and served its settings, which only the Admin role reads. |
 | `Unauthorized` | False | PMM rejected the token (HTTP 401 or 403), the token lacks the Admin role pmm-agent needs (the settings API answered 401 or 403), or there is no token to send: no `credentialsSecretRef`, the Secret does not exist or has no `apiKey` key. |
 | `UnsupportedServerVersion` | False | The server is not PMM 3 (`serverVersion` shows what it is). |
-| `Unreachable` | False | Connection, DNS or TLS error, an unexpected HTTP status, a reply that is not a PMM version, or a missing or invalid `url`. |
+| `InvalidParameters` | False | `parameters` cannot be decoded, or `url` is missing or not an `http://` or `https://` URL with a host. |
+| `Unreachable` | False | Connection, DNS or TLS error, an address the check refuses (see [Server check limits](#server-check-limits)), a redirect, an unexpected HTTP status, or a reply that is not a PMM version. |
 | `Pending` | Unknown | Not checked yet: the controller is not running or has not reached this destination yet. |
 
 `serverVersion` keeps the last version the server reported while it is unreachable or rejects the token.
 
+### Server check limits
+
+A destination can name any Secret in its namespace, and the check sends that Secret's `apiKey` to the destination's `url`. Creating or updating a `pmm` destination is therefore a privileged action: grant it only to those trusted with the Secrets of that namespace. The check itself is limited so that a destination cannot turn it against the cluster:
+
+- `url` must be `http://` or `https://` with a host.
+- Redirects are not followed: a 3xx reply is `Unreachable` and its message names only the target host. No HTTP proxy is used.
+- The controller resolves the host itself and does not connect if any of its addresses is link-local (`169.254.0.0/16`, `fe80::/10`, which include cloud metadata endpoints) or unspecified (`0.0.0.0`, `::`). Loopback addresses (`127.0.0.0/8`, `::1`, `localhost`) are refused too unless the chart value `probe.allowLoopback` is `true`, for a PMM server running next to the controller in development.
+- At most 64 KiB of a reply is read. Reply bodies and headers, apart from a redirect's target host, never reach the condition, whose message is capped at 1 KiB.
+
 ## Kubernetes infrastructure metrics
 
-This extension sends database metrics and Query Analytics to PMM. Kubernetes infrastructure metrics (nodes, pods, kube-state-metrics) are not part of it: shipping them to PMM is a separate, manual setup outside OpenEverest, and this chart neither installs nor manages it.
+This extension sends database metrics and Query Analytics to PMM. Kubernetes infrastructure metrics (nodes, pods, kube-state-metrics) are not part of it: shipping them to PMM is a separate, manual setup outside OpenEverest, and this chart neither installs nor manages it. That setup takes:
+
+- [kube-state-metrics](https://github.com/kubernetes/kube-state-metrics), for the state of Kubernetes objects;
+- a metrics agent remote-writing to PMM's VictoriaMetrics at `<pmm-url>/victoriametrics/api/v1/write` with a PMM service-account token: either the [VictoriaMetrics Operator](https://docs.victoriametrics.com/operator/) with a `VMAgent`, or a standalone vmagent;
+- what that agent scrapes: kube-state-metrics, and the kubelet and cAdvisor on every node (with the operator, a `VMServiceScrape` and `VMNodeScrape`s).
 
 ## Chart values
 
@@ -152,7 +168,7 @@ This extension sends database metrics and Query Analytics to PMM. Kubernetes inf
 | `class.agentImage` | `percona/pmm-client:3.8.0` | **Required.** pmm-client image the providers run next to each database. Changing it restarts the database pods of every Instance sending to a destination of this class. |
 | `class.agentVersion` | `3.8.0` | **Required.** Version of `class.agentImage`, matched against the pmm-client versions each provider supports. |
 | `class.create` | `true` | Install the `MonitoringClass`. |
-| `class.name` | `pmm` | Name of the class destinations reference. |
+| `class.name` | `pmm` | Name of the class destinations reference, and the only class the controller claims. |
 | `class.displayName` | `Percona Monitoring and Management` | Name the UI shows for the class. |
 | `image.repository` | `ghcr.io/openeverest/monitoring-pmm` | Controller image. |
 | `image.tag` | chart `appVersion` | Controller image tag. |
@@ -164,7 +180,9 @@ This extension sends database metrics and Query Analytics to PMM. Kubernetes inf
 
 ### Permissions
 
-The controller reads `monitoringclasses` and `monitoringdestinations` and patches only their status. It also needs `get`, `list` and `watch` on Secrets: it authenticates to PMM with the token in each destination's credentials Secret and re-checks a destination when its Secret changes. It is the only monitoring extension that reads destination Secrets, and it never reads Instance credentials. Secrets are watched metadata-only and read on demand, so their contents are not cached. Leader election uses a Role in the release namespace.
+The controller reads `monitoringclasses` and `monitoringdestinations` and patches only their status. It also needs `get` on Secrets, and nothing more: it reads the token from a destination's credentials Secret each time it checks that destination, and never lists, watches or caches Secrets. It is the only monitoring extension that reads destination Secrets, and it never reads Instance credentials. Leader election uses a Role in the release namespace.
+
+The Secret `get` is cluster-wide, a known limit of this release (OpenEverest 2.0.0-dev.5): destination tokens live in the users' namespaces, which are not known when the chart is installed, so the chart cannot ship a namespaced Role for them. Narrowing the grant to the Secrets destinations reference is later work.
 
 ## Compatibility
 
