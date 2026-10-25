@@ -1,17 +1,18 @@
-# Shipped by the monitoring-pmm extension chart. agentImage is set from chart
-# values so an air-gapped mirror can override it.
+{{- if .Values.class.create -}}
 apiVersion: monitoring.openeverest.io/v1alpha1
 kind: MonitoringClass
 metadata:
-  name: pmm
+  name: {{ .Values.class.name }}
+  labels:
+    {{- include "monitoring-pmm.labels" . | nindent 4 }}
 spec:
   controllerName: openeverest.io/monitoring-pmm
-  displayName: Percona Monitoring and Management
+  displayName: {{ .Values.class.displayName }}
   description: Operator-native PMM integration rendered by the provider (metrics + QAN).
   providerManaged:
     integration: pmm
-    agentImage: percona/pmm-client:3.8.0
-    agentVersion: 3.8.0
+    agentImage: {{ .Values.class.agentImage }}
+    agentVersion: {{ .Values.class.agentVersion }}
     features: [queryAnalytics]
   destinationParametersSchema:
     openAPIV3Schema:
@@ -42,3 +43,4 @@ spec:
                 type: string
   credentialsSchema:
     required: [apiKey]
+{{- end }}

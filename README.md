@@ -12,6 +12,11 @@ operator's native `spec.pmm` from the binding inside `Sync`, and
 provider-runtime owns the binding's `Configured` condition.
 
 ```sh
-kubectl apply -f deploy/class.yaml
-go run ./cmd/controller            # uses the current kubeconfig
+# Installs the controller and claims the `pmm` MonitoringClass. Like a provider,
+# it is its own chart, so it can ship as a hub extension or as a conditional
+# subchart of the OpenEverest chart (the natural home for the PMM pipeline core
+# ships today). `class.agentImage` is the pmm-client the providers render.
+helm install monitoring-pmm charts/monitoring-pmm -n openeverest-system
 ```
+
+It runs in-cluster because it has to reach the PMM Server's Service DNS name.
