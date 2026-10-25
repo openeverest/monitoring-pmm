@@ -37,7 +37,7 @@ PMM 3 only: a PMM 2 server is reported as `UnsupportedServerVersion`.
 helm install monitoring-pmm oci://ghcr.io/openeverest/charts/monitoring-pmm -n openeverest-system \
   --set class.agentImage=percona/pmm-client:3.8.0 \
   --set class.agentVersion=3.8.0
-kubectl get monitoringclass pmm   # ACCEPTED becomes True once the controller runs
+kubectl get monitoringclass pmm   # ACCEPTED shows Accepted once the controller has claimed the class
 ```
 
 `class.agentImage` and `class.agentVersion` are required values. They are the pmm-client image every provider runs next to the databases that send to a `pmm` destination, and its version, which each provider checks against the pmm-client versions it supports; providers ship no PMM image of their own. The chart defaults them to `percona/pmm-client:3.8.0` and `3.8.0`, so the install works without the two `--set` flags, but setting them pins the agent independently of chart upgrades and lets you point at a mirrored image. Setting either one empty fails the install with `class.agentImage is required` (or `class.agentVersion is required`). Changing them later restarts the database pods of every Instance that sends to a `pmm` destination.
@@ -100,7 +100,7 @@ spec:
 ```sh
 kubectl -n team-a get monitoringdestination pmm-prod
 # NAME       CLASS   ACCEPTED   READY   VERSION   AGE
-# pmm-prod   pmm     True       True    3.8.0     1m
+# pmm-prod   pmm     Accepted   Ready   3.8.0     1m
 ```
 
 ## Send an Instance's monitoring to PMM
