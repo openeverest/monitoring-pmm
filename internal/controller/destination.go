@@ -24,6 +24,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -88,8 +90,8 @@ func NewDestinationReconciler(c client.Client, secrets client.Reader, opts Optio
 }
 
 // SetupWithManager re-probes a destination when its spec or its class
-// changes, and periodically after that; the periodic probe also picks up a
-// rotated token.
+// changes, and periodically after that, backing off while it keeps failing;
+// the periodic probe also picks up a rotated token.
 func (r *DestinationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("monitoring-pmm-destination").
@@ -123,9 +125,19 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 	if ready.reason != monitoringv1alpha1.ReasonReady {
-		return ctrl.Result{RequeueAfter: retryInterval}, nil
+		return ctrl.Result{RequeueAfter: retryAfter(dst)}, nil
 	}
 	return ctrl.Result{RequeueAfter: recheckInterval}, nil
+}
+
+// retryAfter waits as long as dst has been failing before this probe, from
+// retryInterval up to recheckInterval.
+func retryAfter(dst *monitoringv1alpha1.MonitoringDestination) time.Duration {
+	ready := meta.FindStatusCondition(dst.Status.Conditions, monitoringv1alpha1.MonitoringDestinationConditionReady)
+	if ready == nil || ready.Status != metav1.ConditionFalse {
+		return retryInterval
+	}
+	return min(max(time.Since(ready.LastTransitionTime.Time), retryInterval), recheckInterval)
 }
 
 func (r *DestinationReconciler) check(ctx context.Context, dst *monitoringv1alpha1.MonitoringDestination) (readiness, error) {

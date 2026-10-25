@@ -47,8 +47,8 @@ spec:
         - assert:
             file: 20-assert.yaml
 
-    # Secrets are not watched: a failing destination is re-probed every
-    # minute, which picks up the restored token.
+    # Secrets are not watched: a destination failing for less than a minute
+    # is re-probed after a minute, which picks up the restored token.
     - name: token-restored
       try:
         - apply:

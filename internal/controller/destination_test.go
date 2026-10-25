@@ -408,6 +408,42 @@ func TestDestinationReadiness(t *testing.T) {
 	}
 }
 
+func TestDestinationRetryBacksOffWhileFailing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		previous metav1.ConditionStatus
+		since    time.Duration
+		want     time.Duration
+	}{
+		{name: "first probe", want: time.Minute},
+		{name: "ready until now", previous: metav1.ConditionTrue, since: time.Hour, want: time.Minute},
+		{name: "failing for 30 seconds", previous: metav1.ConditionFalse, since: 30 * time.Second, want: time.Minute},
+		{name: "failing for 3 minutes", previous: metav1.ConditionFalse, since: 3 * time.Minute, want: 3 * time.Minute},
+		{name: "failing for an hour", previous: metav1.ConditionFalse, since: time.Hour, want: 5 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dst := destination(t, "pmm", map[string]any{"url": serve(t, pmmServer("3.8.0"))})
+			if tt.previous != "" {
+				dst.Status.Conditions = []metav1.Condition{{
+					Type:               monitoringv1alpha1.MonitoringDestinationConditionReady,
+					Status:             tt.previous,
+					Reason:             "Previous",
+					LastTransitionTime: metav1.NewTime(time.Now().Add(-tt.since)),
+				}}
+			}
+
+			res, got := reconcile(t, newFakeClient(t, pmmClass(), dst, tokenSecret("apiKey", "glsa_revoked")))
+
+			assert.Equal(t, string(monitoringv1alpha1.ReasonUnauthorized), readyCondition(t, got).Reason)
+			assert.InDelta(t, float64(tt.want), float64(res.RequeueAfter), float64(5*time.Second))
+		})
+	}
+}
+
 func TestDestinationProbeRefusesAddresses(t *testing.T) {
 	t.Parallel()
 
