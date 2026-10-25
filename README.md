@@ -95,7 +95,7 @@ spec:
 | Parameter | Required | Description |
 |---|---|---|
 | `url` | yes | PMM server URL, `http://` or `https://`, for example `https://pmm.example.com`. |
-| `verifyTLS` | no | Verify the server's TLS certificate. Defaults to `true`; set `false` only for a self-signed PMM server. |
+| `verifyTLS` | no | Verify the server's TLS certificate when this controller checks the server. Defaults to `true`; set `false` only for a self-signed PMM server. The agents' TLS behaviour is the database operator's, not this parameter's. |
 
 ```sh
 kubectl -n team-a get monitoringdestination pmm-prod
@@ -157,6 +157,8 @@ This extension sends database metrics and Query Analytics to PMM. Kubernetes inf
 | `image.repository` | `ghcr.io/openeverest/monitoring-pmm` | Controller image. |
 | `image.tag` | chart `appVersion` | Controller image tag. |
 | `leaderElection.enabled` | `true` | Leader election (needed with more than one replica). |
+| `podSecurityContext`, `securityContext` | Pod Security Standard `restricted`, UID 65532 | Controller pod and container security context. |
+| `probe.allowLoopback` | `false` | Let the server check connect to loopback addresses such as `localhost`. Link-local addresses, which include cloud metadata endpoints, are always refused. |
 | `rbac.create` | `true` | Create the ClusterRole, the leader-election Role and their bindings. |
 | `resources` | 20m/64Mi requests, 200m/128Mi limits | Controller resources. |
 

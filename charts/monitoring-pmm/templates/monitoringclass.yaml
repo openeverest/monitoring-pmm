@@ -25,7 +25,7 @@ spec:
           description: PMM Server URL, for example https://pmm.example.com.
         verifyTLS:
           type: boolean
-          description: Verify the PMM Server TLS certificate. Defaults to true.
+          description: Verify the PMM Server TLS certificate. Applies to this controller's readiness probe; the agents' TLS behaviour is the operator's. Defaults to true.
   instanceParametersSchema:
     openAPIV3Schema:
       type: object
@@ -33,15 +33,24 @@ spec:
         resources:
           type: object
           description: Resource requirements of the pmm-client container.
+          additionalProperties: false
           properties:
             limits:
               type: object
               additionalProperties:
-                type: string
+                anyOf:
+                  - type: integer
+                  - type: string
+                pattern: '^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$'
+                x-kubernetes-int-or-string: true
             requests:
               type: object
               additionalProperties:
-                type: string
+                anyOf:
+                  - type: integer
+                  - type: string
+                pattern: '^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$'
+                x-kubernetes-int-or-string: true
   credentialsSchema:
     required: [apiKey]
   ui:
@@ -49,4 +58,72 @@ spec:
     links:
       - name: Open in PMM
         url: '{{ "{{" }} .destination.parameters.url {{ "}}" }}'
+  uiSchema:
+    destination:
+      componentsOrder: [url, verifyTLS]
+      components:
+        url:
+          path: parameters.url
+          uiType: text
+          fieldParams:
+            label: PMM server URL
+            placeholder: https://pmm.example.com
+            helperText: PMM 3 server reachable from the cluster; the database pods register with it.
+          validation:
+            required: true
+            url: true
+        verifyTLS:
+          path: parameters.verifyTLS
+          uiType: toggle
+          fieldParams:
+            label: Verify TLS certificate
+            defaultValue: true
+            helperText: Applies to this controller's readiness check of the server; the agents' TLS behaviour is the database operator's.
+    credentials:
+      componentsOrder: [apiKey]
+      components:
+        apiKey:
+          path: apiKey
+          uiType: text
+          fieldParams:
+            label: Service account token
+            type: password
+            placeholder: glsa_...
+            helperText: Token of a PMM service account with the Admin role.
+          validation:
+            required: true
+    instance:
+      componentsOrder: [resources]
+      components:
+        resources:
+          uiType: group
+          groupType: line
+          label: pmm-client resources
+          description: Requests and limits of the pmm-client container, on top of the Instance size defaults.
+          componentsOrder: [cpuRequest, memoryRequest, cpuLimit, memoryLimit]
+          components:
+            cpuRequest:
+              path: parameters.resources.requests.cpu
+              uiType: text
+              fieldParams:
+                label: CPU request
+                placeholder: 100m
+            memoryRequest:
+              path: parameters.resources.requests.memory
+              uiType: text
+              fieldParams:
+                label: Memory request
+                placeholder: 128Mi
+            cpuLimit:
+              path: parameters.resources.limits.cpu
+              uiType: text
+              fieldParams:
+                label: CPU limit
+                placeholder: 500m
+            memoryLimit:
+              path: parameters.resources.limits.memory
+              uiType: text
+              fieldParams:
+                label: Memory limit
+                placeholder: 256Mi
 {{- end }}

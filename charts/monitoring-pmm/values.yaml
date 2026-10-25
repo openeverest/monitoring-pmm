@@ -43,9 +43,14 @@ probe:
 podAnnotations: {}
 podLabels: {}
 
+# Pod Security Standard "restricted"; 65532 is the image's nonroot user.
 podSecurityContext:
   runAsNonRoot: true
-  fsGroup: 65534
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   allowPrivilegeEscalation: false
@@ -54,7 +59,6 @@ securityContext:
       - ALL
   readOnlyRootFilesystem: true
   runAsNonRoot: true
-  runAsUser: 65534
 
 resources:
   limits:
