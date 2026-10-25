@@ -4,8 +4,6 @@
     - secrets
   verbs:
     - get
-    - list
-    - watch
 - apiGroups:
     - monitoring.openeverest.io
   resources:

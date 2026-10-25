@@ -13,8 +13,9 @@
 // limitations under the License.
 
 // Command monitoring-pmm is the ProviderManaged MonitoringClass controller for
-// Percona Monitoring and Management: it claims the pmm class and keeps every
-// pmm MonitoringDestination's Ready condition and serverVersion current.
+// Percona Monitoring and Management: it claims its configured class and keeps
+// the Ready condition and serverVersion of that class's MonitoringDestinations
+// current.
 // Rendering pmm-client into the engine pods is done by the providers.
 package main
 
@@ -36,12 +37,14 @@ import (
 )
 
 func main() {
-	var metricsAddr, probeAddr string
-	var leaderElect bool
+	var metricsAddr, probeAddr, className string
+	var leaderElect, allowLoopback bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "Metrics endpoint bind address ('0' disables it).")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint bind address.")
-	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election; the lease is named after the controller.")
-	opts := zap.Options{}
+	flag.StringVar(&className, "class-name", "pmm", "Name of the MonitoringClass this controller claims and serves.")
+	flag.BoolVar(&allowLoopback, "probe-allow-loopback", false, "Let the PMM server probe connect to loopback addresses.")
+	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election; the lease is named after the class.")
+	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
@@ -55,7 +58,7 @@ func main() {
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
-		LeaderElectionID:       "monitoring-pmm.openeverest.io",
+		LeaderElectionID:       className + ".monitoring-pmm.openeverest.io",
 	})
 	if err != nil {
 		ctrl.Log.Error(err, "unable to start manager")
@@ -69,7 +72,7 @@ func main() {
 		ctrl.Log.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
-	if err := controller.Setup(mgr); err != nil {
+	if err := controller.Setup(mgr, controller.Options{ClassName: className, AllowLoopback: allowLoopback}); err != nil {
 		ctrl.Log.Error(err, "unable to set up controller")
 		os.Exit(1)
 	}

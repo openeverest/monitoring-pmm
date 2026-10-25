@@ -38,6 +38,10 @@ spec:
           args:
             - --health-probe-bind-address=:8081
             - --zap-log-level={{ .Values.logLevel }}
+            - --class-name={{ .Values.class.name }}
+            {{- if .Values.probe.allowLoopback }}
+            - --probe-allow-loopback
+            {{- end }}
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect
             {{- end }}

@@ -33,6 +33,13 @@ class:
   # versions each provider supports.
   agentVersion: 3.8.0
 
+# The controller's PMM server check (destination Ready).
+probe:
+  # -- Let the check connect to loopback addresses such as localhost.
+  # Link-local addresses, which include cloud metadata endpoints, are always
+  # refused.
+  allowLoopback: false
+
 podAnnotations: {}
 podLabels: {}
 

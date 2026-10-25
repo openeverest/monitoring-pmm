@@ -38,14 +38,24 @@ spec:
             timeout: 2m
             file: 10-assert.yaml
 
-    # Rotating the Secret to a token the server rejects is picked up through
-    # the Secret watch; the last known serverVersion is kept.
+    # The destination change re-probes at once; the last known serverVersion
+    # is kept.
     - name: token-rejected
       try:
         - apply:
             file: 20-wrong-token.yaml
         - assert:
             file: 20-assert.yaml
+
+    # Secrets are not watched: a failing destination is re-probed every
+    # minute, which picks up the restored token.
+    - name: token-restored
+      try:
+        - apply:
+            file: 25-token-restored.yaml
+        - assert:
+            timeout: 2m
+            file: 10-assert.yaml
 
     - name: pmm2-unsupported
       try:

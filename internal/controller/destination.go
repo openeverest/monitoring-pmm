@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +27,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -42,6 +44,8 @@ const credentialsKey = "apiKey"
 const (
 	recheckInterval = 5 * time.Minute
 	retryInterval   = time.Minute
+	// maxMessageBytes bounds the Ready condition message.
+	maxMessageBytes = 1 << 10
 )
 
 // destinationParameters is MonitoringDestination.spec.parameters of the pmm
@@ -58,38 +62,41 @@ type readiness struct {
 	version string
 }
 
-// DestinationReconciler probes the PMM server behind every destination of a
-// class this controller owns and reports the result as the destination's
-// Ready condition and serverVersion.
+// DestinationReconciler probes the PMM server behind every destination of
+// the class this controller serves and reports the result as the
+// destination's Ready condition and serverVersion.
 type DestinationReconciler struct {
 	client    client.Client
 	secrets   client.Reader
 	classes   monitoring.ClassController
+	className string
 	verifying *http.Client
 	insecure  *http.Client
 }
 
 // NewDestinationReconciler reads destination Secrets through secrets, so the
-// manager need not cache every Secret in the cluster.
-func NewDestinationReconciler(c client.Client, secrets client.Reader) *DestinationReconciler {
+// manager need not cache or watch any Secret.
+func NewDestinationReconciler(c client.Client, secrets client.Reader, opts Options) *DestinationReconciler {
 	return &DestinationReconciler{
 		client:    c,
 		secrets:   secrets,
 		classes:   monitoring.ClassController{Client: c, ControllerName: ControllerName},
-		verifying: newHTTPClient(true),
-		insecure:  newHTTPClient(false),
+		className: opts.ClassName,
+		verifying: newHTTPClient(true, opts.AllowLoopback),
+		insecure:  newHTTPClient(false, opts.AllowLoopback),
 	}
 }
 
-// SetupWithManager re-probes a destination when its spec, its credentials
-// Secret or its class changes, and periodically after that.
+// SetupWithManager re-probes a destination when its spec or its class
+// changes, and periodically after that; the periodic probe also picks up a
+// rotated token.
 func (r *DestinationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("monitoring-pmm-destination").
 		For(&monitoringv1alpha1.MonitoringDestination{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.destinationsUsingSecret), builder.OnlyMetadata).
 		Watches(&monitoringv1alpha1.MonitoringClass{}, handler.EnqueueRequestsFromMapFunc(r.destinationsOfClass),
 			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 4}).
 		Complete(r)
 }
 
@@ -100,7 +107,10 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.client.Get(ctx, req.NamespacedName, dst); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	ours, err := r.classes.OwnsClass(ctx, dst.Spec.ClassRef.Name)
+	if dst.Spec.ClassRef.Name != r.className {
+		return ctrl.Result{}, nil
+	}
+	ours, err := r.classes.OwnsClass(ctx, r.className)
 	if err != nil || !ours {
 		return ctrl.Result{}, err
 	}
@@ -109,10 +119,10 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.classes.SetDestinationReady(ctx, dst, ready.reason, ready.message, ready.version); err != nil {
+	if err := r.classes.SetDestinationReady(ctx, dst, ready.reason, truncate(ready.message), ready.version); err != nil {
 		return ctrl.Result{}, err
 	}
-	if ready.reason == monitoringv1alpha1.ReasonUnreachable {
+	if ready.reason != monitoringv1alpha1.ReasonReady {
 		return ctrl.Result{RequeueAfter: retryInterval}, nil
 	}
 	return ctrl.Result{RequeueAfter: recheckInterval}, nil
@@ -121,11 +131,11 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 func (r *DestinationReconciler) check(ctx context.Context, dst *monitoringv1alpha1.MonitoringDestination) (readiness, error) {
 	params, err := decodeParameters(dst)
 	if err != nil {
-		return unreachable(err.Error()), nil
+		return invalidParameters(err.Error()), nil
 	}
-	endpoint, err := versionEndpoint(params.URL)
+	base, err := baseURL(params.URL)
 	if err != nil {
-		return unreachable(err.Error()), nil
+		return invalidParameters(err.Error()), nil
 	}
 
 	// Without a token there is nothing to authenticate with: Ready=False,
@@ -140,7 +150,7 @@ func (r *DestinationReconciler) check(ctx context.Context, dst *monitoringv1alph
 		}
 		return readiness{}, fmt.Errorf("get credentials Secret %q: %w", dst.Spec.CredentialsSecretRef.Name, err)
 	}
-	token := string(secret.Data[credentialsKey])
+	token := strings.TrimSpace(string(secret.Data[credentialsKey]))
 	if token == "" {
 		return unauthorized(fmt.Sprintf("credentials Secret %q has no %q key", secret.Name, credentialsKey)), nil
 	}
@@ -149,7 +159,7 @@ func (r *DestinationReconciler) check(ctx context.Context, dst *monitoringv1alph
 	if params.VerifyTLS != nil && !*params.VerifyTLS {
 		httpClient = r.insecure
 	}
-	return probe(ctx, httpClient, endpoint, token), nil
+	return probe(ctx, httpClient, base, token), nil
 }
 
 func decodeParameters(dst *monitoringv1alpha1.MonitoringDestination) (destinationParameters, error) {
@@ -163,31 +173,30 @@ func decodeParameters(dst *monitoringv1alpha1.MonitoringDestination) (destinatio
 	return params, nil
 }
 
-func (r *DestinationReconciler) destinationsUsingSecret(ctx context.Context, secret client.Object) []reconcile.Request {
-	return r.enqueue(ctx, func(dst *monitoringv1alpha1.MonitoringDestination) bool {
-		return dst.Spec.CredentialsSecretRef != nil && dst.Spec.CredentialsSecretRef.Name == secret.GetName()
-	}, client.InNamespace(secret.GetNamespace()))
-}
-
 func (r *DestinationReconciler) destinationsOfClass(ctx context.Context, class client.Object) []reconcile.Request {
-	return r.enqueue(ctx, func(dst *monitoringv1alpha1.MonitoringDestination) bool {
-		return dst.Spec.ClassRef.Name == class.GetName()
-	})
-}
-
-func (r *DestinationReconciler) enqueue(ctx context.Context, match func(*monitoringv1alpha1.MonitoringDestination) bool, opts ...client.ListOption) []reconcile.Request {
+	if class.GetName() != r.className {
+		return nil
+	}
 	list := &monitoringv1alpha1.MonitoringDestinationList{}
-	if err := r.client.List(ctx, list, opts...); err != nil {
+	if err := r.client.List(ctx, list); err != nil {
 		log.FromContext(ctx).Error(err, "listing MonitoringDestinations failed")
 		return nil
 	}
 	var reqs []reconcile.Request
 	for i := range list.Items {
-		if match(&list.Items[i]) {
+		if list.Items[i].Spec.ClassRef.Name == r.className {
 			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 		}
 	}
 	return reqs
+}
+
+// truncate keeps a message within maxMessageBytes.
+func truncate(message string) string {
+	if len(message) <= maxMessageBytes {
+		return message
+	}
+	return strings.ToValidUTF8(message[:maxMessageBytes-3], "") + "..."
 }
 
 func unreachable(message string) readiness {
@@ -196,4 +205,8 @@ func unreachable(message string) readiness {
 
 func unauthorized(message string) readiness {
 	return readiness{reason: monitoringv1alpha1.ReasonUnauthorized, message: message}
+}
+
+func invalidParameters(message string) readiness {
+	return readiness{reason: monitoringv1alpha1.ReasonReadyInvalidParameters, message: message}
 }

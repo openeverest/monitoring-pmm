@@ -1,0 +1,8 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pmm-it-token
+type: Opaque
+stringData:
+  apiKey: glsa_chainsaw-token

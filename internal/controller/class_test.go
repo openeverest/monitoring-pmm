@@ -33,7 +33,7 @@ import (
 	"github.com/openeverest/monitoring-pmm/internal/controller"
 )
 
-func TestClassReconcileClaimsOnlyTheRequestedClass(t *testing.T) {
+func TestClassReconcileClaimsOnlyTheConfiguredClass(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -41,16 +41,17 @@ func TestClassReconcileClaimsOnlyTheRequestedClass(t *testing.T) {
 		request     string
 		wantClaimed []string
 	}{
-		{name: "class naming this controller", request: "pmm", wantClaimed: []string{"pmm"}},
+		{name: "configured class naming this controller", request: "pmm", wantClaimed: []string{"pmm"}},
+		{name: "second class naming this controller", request: "pmm-eu"},
 		{name: "class naming another controller", request: "prometheus"},
 		{name: "class deleted", request: "datadog"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newFakeClient(t, pmmClass(), prometheusClass())
+			c := newFakeClient(t, pmmClass(), pmmClassNamed("pmm-eu"), prometheusClass())
 
-			_, err := controller.NewClassReconciler(c).Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKey{Name: tt.request}})
+			_, err := controller.NewClassReconciler(c, "pmm").Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKey{Name: tt.request}})
 			require.NoError(t, err)
 
 			classes := &monitoringv1alpha1.MonitoringClassList{}
@@ -79,7 +80,7 @@ func TestClassReconcileReturnsFailedClaimForRetry(t *testing.T) {
 		},
 	})
 
-	_, err := controller.NewClassReconciler(c).Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "pmm"}})
+	_, err := controller.NewClassReconciler(c, "pmm").Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "pmm"}})
 
 	require.ErrorIs(t, err, errUnavailable)
 }
