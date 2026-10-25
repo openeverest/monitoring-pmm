@@ -13,11 +13,10 @@ IMG ?= ghcr.io/openeverest/monitoring-pmm-dev:latest
 _IMG_REPO = $(firstword $(subst :, ,$(IMG)))
 _IMG_TAG  = $(lastword $(subst :, ,$(IMG)))
 
-# Branch of openeverest/openeverest the integration tests install the CRDs
-# from. Tracks the core API go.mod is pinned to; flip to main once the
-# monitoring API is merged there.
-OPENEVEREST_BRANCH ?= monitoring/01-api
-_CRD_BASE = https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_BRANCH)/config/crd/bases
+# CRDs of the openeverest core version pinned in go.mod, for the integration
+# tests.
+OPENEVEREST_MODULE = github.com/openeverest/openeverest/v2
+OPENEVEREST_CRDS = $$(go list -m -f '{{.Dir}}' $(OPENEVEREST_MODULE))/config/crd/bases
 
 # pmm-client image and version the integration tests install the class with
 AGENT_IMAGE ?= percona/pmm-client:3.8.0
@@ -122,18 +121,10 @@ load-image: ## Import IMG into the k3d cluster.
 	k3d image import $(IMG) -c $(K3D_CLUSTER_NAME)
 
 .PHONY: install-crds
-install-crds: ## Install the OpenEverest CRDs from OPENEVEREST_BRANCH.
-	kubectl apply --server-side -f $(_CRD_BASE)/monitoring.openeverest.io_monitoringclasses.yaml
-	kubectl apply --server-side -f $(_CRD_BASE)/monitoring.openeverest.io_monitoringdestinations.yaml
-	kubectl apply --server-side -f $(_CRD_BASE)/monitoring.openeverest.io_monitoringbindings.yaml
-	kubectl apply --server-side -f $(_CRD_BASE)/core.openeverest.io_providers.yaml
-	kubectl apply --server-side -f $(_CRD_BASE)/core.openeverest.io_instances.yaml
-	kubectl wait --for=condition=Established --timeout=60s \
-		crd/monitoringclasses.monitoring.openeverest.io \
-		crd/monitoringdestinations.monitoring.openeverest.io \
-		crd/monitoringbindings.monitoring.openeverest.io \
-		crd/providers.core.openeverest.io \
-		crd/instances.core.openeverest.io
+install-crds: ## Install the OpenEverest CRDs of the core version pinned in go.mod.
+	go mod download $(OPENEVEREST_MODULE)
+	kubectl apply --server-side -f $(OPENEVEREST_CRDS)
+	kubectl wait --for=condition=Established --timeout=60s -f $(OPENEVEREST_CRDS)
 
 .PHONY: deploy-ci
 deploy-ci: ## Install the chart with IMG (already imported into k3d).

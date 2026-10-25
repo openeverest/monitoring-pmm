@@ -20,10 +20,6 @@ permissions:
 
 env:
   IMG: monitoring-pmm:ci
-  # Branch of openeverest/openeverest to install the CRDs from. Tracks the
-  # core API go.mod is pinned to; flip to main once the monitoring API is
-  # merged there.
-  OPENEVEREST_BRANCH: monitoring/01-api
 
 jobs:
   run:
@@ -41,6 +37,12 @@ jobs:
           install-chainsaw: 'true'
 
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+
+      # The OpenEverest CRDs come from the core module pinned in go.mod.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Create k3d cluster
         run: |

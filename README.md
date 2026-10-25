@@ -182,7 +182,7 @@ make generate           # ClusterRole from the kubebuilder markers in internal/c
 make helm-lint helm-template
 ```
 
-Integration tests (chainsaw) run the chart against a fake PMM server in k3d. The cluster holds only the OpenEverest CRDs, installed from the openeverest branch in `OPENEVEREST_BRANCH`, not core itself:
+Integration tests (chainsaw) run the chart against a fake PMM server in k3d. The cluster holds only the OpenEverest CRDs, taken from the core module version pinned in `go.mod`, not core itself:
 
 ```sh
 make k3d-cluster-up
