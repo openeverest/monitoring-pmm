@@ -123,9 +123,9 @@ func baseURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// probe calls the PMM server version API. PMM 3 serves /v1/version as an
-// alias of /v1/server/version, so the same request also identifies a PMM 2
-// server.
+// probe calls the PMM server version API and, on PMM 3, checks the token's
+// role. PMM 3 serves /v1/version as an alias of /v1/server/version, so the
+// same request also identifies a PMM 2 server.
 func probe(ctx context.Context, httpClient *http.Client, base *url.URL, token string) readiness {
 	endpoint := base.JoinPath("v1", "version").String()
 	status, body, err := get(ctx, httpClient, endpoint, token)
@@ -154,10 +154,35 @@ func probe(ctx context.Context, httpClient *http.Client, base *url.URL, token st
 			version: v.String(),
 		}
 	}
+	return checkAdminRole(ctx, httpClient, base, token, v.String())
+}
+
+// checkAdminRole reads the server settings, which PMM serves only to the
+// Admin role pmm-agent registers with; a Viewer or Editor token passes the
+// version check alone.
+func checkAdminRole(ctx context.Context, httpClient *http.Client, base *url.URL, token, version string) readiness {
+	endpoint := base.JoinPath("v1", "server", "settings").String()
+	status, _, err := get(ctx, httpClient, endpoint, token)
+	switch {
+	case err != nil:
+		return readiness{reason: monitoringv1alpha1.ReasonUnreachable, message: err.Error(), version: version}
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return readiness{
+			reason:  monitoringv1alpha1.ReasonUnauthorized,
+			message: fmt.Sprintf("token lacks the Admin role pmm-agent needs: GET %s returned HTTP %d", endpoint, status),
+			version: version,
+		}
+	case status != http.StatusOK:
+		return readiness{
+			reason:  monitoringv1alpha1.ReasonUnreachable,
+			message: fmt.Sprintf("GET %s returned HTTP %d", endpoint, status),
+			version: version,
+		}
+	}
 	return readiness{
 		reason:  monitoringv1alpha1.ReasonReady,
-		message: fmt.Sprintf("PMM server %s is reachable and accepts the token", v),
-		version: v.String(),
+		message: fmt.Sprintf("PMM server %s is reachable and the token has the Admin role pmm-agent needs", version),
+		version: version,
 	}
 }
 

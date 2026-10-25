@@ -52,8 +52,9 @@ import (
 const (
 	testNamespace   = "team-a"
 	testDestination = "pmm-prod"
-	testSecret      = "pmm-prod-token"  //nolint:gosec // a Secret name, not a credential
-	testToken       = "glsa_test-token" //nolint:gosec // fake token the fake PMM server accepts
+	testSecret      = "pmm-prod-token"    //nolint:gosec // a Secret name, not a credential
+	testToken       = "glsa_test-token"   //nolint:gosec // fake token the fake PMM server accepts
+	testViewerToken = "glsa_viewer-token" //nolint:gosec // fake token without the Admin role
 )
 
 func destinationKey() client.ObjectKey {
@@ -148,20 +149,27 @@ func tokenSecret(key, value string) *corev1.Secret {
 	}
 }
 
-// pmmServer answers the version API like a PMM server of the given version
-// that accepts only testToken.
+// pmmServer answers the version and settings APIs like a PMM server of the
+// given version where testToken has the Admin role and testViewerToken the
+// Viewer role.
 func pmmServer(version string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/version" {
+		auth := r.Header.Get("Authorization")
+		admin := auth == "Bearer "+testToken
+		switch {
+		case r.URL.Path != "/v1/version" && r.URL.Path != "/v1/server/settings":
 			http.NotFound(w, r)
-			return
-		}
-		if r.Header.Get("Authorization") != "Bearer "+testToken {
+		case !admin && auth != "Bearer "+testViewerToken:
 			http.Error(w, `{"message":"Unauthorized"}`, http.StatusUnauthorized)
-			return
+		case r.URL.Path == "/v1/server/settings" && !admin:
+			http.Error(w, `{"message":"Access denied"}`, http.StatusForbidden)
+		case r.URL.Path == "/v1/server/settings":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"settings":{"telemetry_enabled":true}}`)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"version":%q,"server":{"version":%q}}`, version, version)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"version":%q,"server":{"version":%q}}`, version, version)
 	})
 }
 
@@ -223,6 +231,9 @@ func TestDestinationReadiness(t *testing.T) {
 		return func(t *testing.T) any { t.Helper(); return serve(t, h) }
 	}
 	oversized := `{"version":"3.8.0","padding":"` + strings.Repeat("x", 70<<10) + `"}`
+	settingsFailing := http.NewServeMux()
+	settingsFailing.Handle("/v1/version", pmmServer("3.8.0"))
+	settingsFailing.Handle("/v1/server/settings", reply(http.StatusInternalServerError, "settings with internal details"))
 
 	tests := []struct {
 		name        string
@@ -239,9 +250,28 @@ func TestDestinationReadiness(t *testing.T) {
 			url:         server(pmmServer("3.8.0")),
 			secret:      tokenSecret("apiKey", testToken),
 			wantReason:  monitoringv1alpha1.ReasonReady,
-			wantMessage: "PMM server 3.8.0 is reachable",
+			wantMessage: "PMM server 3.8.0 is reachable and the token has the Admin role pmm-agent needs",
 			wantVersion: "3.8.0",
 			wantRequeue: 5 * time.Minute,
+		},
+		{
+			name:        "token without the Admin role",
+			url:         server(pmmServer("3.8.0")),
+			secret:      tokenSecret("apiKey", testViewerToken),
+			wantReason:  monitoringv1alpha1.ReasonUnauthorized,
+			wantMessage: "token lacks the Admin role pmm-agent needs: GET http://127.0.0.1",
+			wantVersion: "3.8.0",
+			wantRequeue: time.Minute,
+		},
+		{
+			name:        "settings API failing",
+			url:         server(settingsFailing),
+			secret:      tokenSecret("apiKey", testToken),
+			wantReason:  monitoringv1alpha1.ReasonUnreachable,
+			wantMessage: "/v1/server/settings returned HTTP 500",
+			notMessage:  "internal details",
+			wantVersion: "3.8.0",
+			wantRequeue: time.Minute,
 		},
 		{
 			name:        "token with a trailing newline",
