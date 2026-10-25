@@ -7,12 +7,12 @@ metadata:
     {{- include "monitoring-pmm.labels" . | nindent 4 }}
 spec:
   controllerName: openeverest.io/monitoring-pmm
-  displayName: {{ .Values.class.displayName }}
-  description: Operator-native PMM integration rendered by the provider (metrics + QAN).
+  displayName: {{ .Values.class.displayName | quote }}
+  description: Percona Monitoring and Management 3. The database provider runs pmm-client next to each database and registers it with the PMM server (metrics and Query Analytics).
   providerManaged:
     integration: pmm
-    agentImage: {{ .Values.class.agentImage }}
-    agentVersion: {{ .Values.class.agentVersion }}
+    agentImage: {{ required "class.agentImage is required: the pmm-client image the providers run next to each database, e.g. percona/pmm-client:3.8.0" .Values.class.agentImage | quote }}
+    agentVersion: {{ required "class.agentVersion is required: the version of class.agentImage, e.g. 3.8.0" .Values.class.agentVersion | quote }}
     features: [queryAnalytics]
   destinationParametersSchema:
     openAPIV3Schema:
@@ -21,10 +21,11 @@ spec:
       properties:
         url:
           type: string
-          description: PMM Server URL, e.g. https://pmm.example.com
+          pattern: '^https?://.+'
+          description: PMM Server URL, for example https://pmm.example.com.
         verifyTLS:
           type: boolean
-          description: Verify the PMM Server TLS certificate (default true).
+          description: Verify the PMM Server TLS certificate. Defaults to true.
   instanceParametersSchema:
     openAPIV3Schema:
       type: object
@@ -43,4 +44,9 @@ spec:
                 type: string
   credentialsSchema:
     required: [apiKey]
+  ui:
+    summaryParameter: url
+    links:
+      - name: Open in PMM
+        url: '{{ "{{" }} .destination.parameters.url {{ "}}" }}'
 {{- end }}

@@ -1,0 +1,30 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-pmm
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - monitoring.openeverest.io
+  resources:
+  - monitoringclasses
+  - monitoringdestinations
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - monitoring.openeverest.io
+  resources:
+  - monitoringclasses/status
+  - monitoringdestinations/status
+  verbs:
+  - patch

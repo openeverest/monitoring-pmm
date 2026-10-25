@@ -25,8 +25,12 @@ class:
   create: true
   name: pmm
   displayName: Percona Monitoring and Management
-  # pmm-client rendered by the providers; admin-controlled, change is gated.
+  # -- (required) pmm-client image the providers run next to each database.
+  # Changing it rolls the database pods of every Instance that sends to a
+  # destination of this class.
   agentImage: percona/pmm-client:3.8.0
+  # -- (required) Version of agentImage, matched against the pmm-client
+  # versions each provider supports.
   agentVersion: 3.8.0
 
 podAnnotations: {}
