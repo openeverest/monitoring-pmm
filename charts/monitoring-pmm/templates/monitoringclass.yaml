@@ -6,14 +6,12 @@ metadata:
   labels:
     {{- include "monitoring-pmm.labels" . | nindent 4 }}
 spec:
-  controllerName: openeverest.io/monitoring-pmm
   displayName: {{ .Values.class.displayName | quote }}
   description: Percona Monitoring and Management 3. The database provider runs pmm-client next to each database and registers it with the PMM server (metrics and Query Analytics).
   providerManaged:
     integration: pmm
     agentImage: {{ required "class.agentImage is required: the pmm-client image the providers run next to each database, e.g. percona/pmm-client:3.8.0" .Values.class.agentImage | quote }}
     agentVersion: {{ required "class.agentVersion is required: the version of class.agentImage, e.g. 3.8.0" .Values.class.agentVersion | quote }}
-    features: [queryAnalytics]
   destinationParametersSchema:
     openAPIV3Schema:
       type: object
@@ -53,11 +51,6 @@ spec:
                 x-kubernetes-int-or-string: true
   credentialsSchema:
     required: [apiKey]
-  ui:
-    summaryParameter: url
-    links:
-      - name: Open in PMM
-        url: '{{ "{{" }} .destination.parameters.url {{ "}}" }}'
   uiSchema:
     destination:
       componentsOrder: [url, verifyTLS]

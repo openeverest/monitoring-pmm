@@ -112,7 +112,6 @@ func pmmClassNamed(name string) *monitoringv1alpha1.MonitoringClass {
 	return &monitoringv1alpha1.MonitoringClass{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringClassSpec{
-			ControllerName:  controller.ControllerName,
 			ProviderManaged: &monitoringv1alpha1.ProviderManagedFulfilment{Integration: "pmm"},
 		},
 	}
@@ -122,7 +121,6 @@ func prometheusClass() *monitoringv1alpha1.MonitoringClass {
 	return &monitoringv1alpha1.MonitoringClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringClassSpec{
-			ControllerName:   "openeverest.io/monitoring-prometheus",
 			ExtensionManaged: &monitoringv1alpha1.ExtensionManagedFulfilment{},
 		},
 	}
@@ -602,14 +600,13 @@ func TestDestinationOfOtherClassIsLeftAlone(t *testing.T) {
 		name  string
 		class string
 	}{
-		{name: "class claimed by another controller", class: "prometheus"},
-		{name: "second class naming this controller", class: "pmm-eu"},
+		{name: "destination of another class", class: "prometheus"},
 		{name: "class not installed", class: "datadog"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			res, dst := reconcile(t, newFakeClient(t, pmmClass(), pmmClassNamed("pmm-eu"), prometheusClass(),
+			res, dst := reconcile(t, newFakeClient(t, pmmClass(), prometheusClass(),
 				destination(t, tt.class, map[string]any{"url": serve(t, rejectRequests(t))}), tokenSecret("apiKey", testToken)))
 
 			assert.Zero(t, res.RequeueAfter)

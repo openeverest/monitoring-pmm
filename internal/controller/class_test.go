@@ -41,9 +41,8 @@ func TestClassReconcileClaimsOnlyTheConfiguredClass(t *testing.T) {
 		request     string
 		wantClaimed []string
 	}{
-		{name: "configured class naming this controller", request: "pmm", wantClaimed: []string{"pmm"}},
-		{name: "second class naming this controller", request: "pmm-eu"},
-		{name: "class naming another controller", request: "prometheus"},
+		{name: "configured class", request: "pmm", wantClaimed: []string{"pmm"}},
+		{name: "another class is left unclaimed", request: "pmm-eu"},
 		{name: "class deleted", request: "datadog"},
 	}
 	for _, tt := range tests {
@@ -63,6 +62,7 @@ func TestClassReconcileClaimsOnlyTheConfiguredClass(t *testing.T) {
 					continue
 				}
 				assert.Equal(t, metav1.ConditionTrue, accepted.Status)
+				assert.Equal(t, "claimed by openeverest.io/monitoring-pmm", accepted.Message)
 				assert.Equal(t, int64(1), accepted.ObservedGeneration)
 				claimed = append(claimed, class.Name)
 			}

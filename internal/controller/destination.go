@@ -71,7 +71,6 @@ type DestinationReconciler struct {
 	client    client.Client
 	secrets   client.Reader
 	classes   monitoring.ClassController
-	className string
 	verifying *http.Client
 	insecure  *http.Client
 }
@@ -82,8 +81,7 @@ func NewDestinationReconciler(c client.Client, secrets client.Reader, opts Optio
 	return &DestinationReconciler{
 		client:    c,
 		secrets:   secrets,
-		classes:   monitoring.ClassController{Client: c, ControllerName: ControllerName},
-		className: opts.ClassName,
+		classes:   monitoring.ClassController{Client: c, FieldOwner: FieldOwner, ClassName: opts.ClassName},
 		verifying: newHTTPClient(true, opts.AllowLoopback),
 		insecure:  newHTTPClient(false, opts.AllowLoopback),
 	}
@@ -109,12 +107,8 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.client.Get(ctx, req.NamespacedName, dst); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if dst.Spec.ClassRef.Name != r.className {
+	if dst.Spec.ClassRef.Name != r.classes.ClassName {
 		return ctrl.Result{}, nil
-	}
-	ours, err := r.classes.OwnsClass(ctx, r.className)
-	if err != nil || !ours {
-		return ctrl.Result{}, err
 	}
 
 	ready, err := r.check(ctx, dst)
@@ -186,7 +180,7 @@ func decodeParameters(dst *monitoringv1alpha1.MonitoringDestination) (destinatio
 }
 
 func (r *DestinationReconciler) destinationsOfClass(ctx context.Context, class client.Object) []reconcile.Request {
-	if class.GetName() != r.className {
+	if class.GetName() != r.classes.ClassName {
 		return nil
 	}
 	list := &monitoringv1alpha1.MonitoringDestinationList{}
@@ -196,7 +190,7 @@ func (r *DestinationReconciler) destinationsOfClass(ctx context.Context, class c
 	}
 	var reqs []reconcile.Request
 	for i := range list.Items {
-		if list.Items[i].Spec.ClassRef.Name == r.className {
+		if list.Items[i].Spec.ClassRef.Name == r.classes.ClassName {
 			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 		}
 	}
