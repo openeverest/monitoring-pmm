@@ -1,0 +1,12 @@
+---
+apiVersion: monitoring.openeverest.io/v1alpha1
+kind: MonitoringDestination
+metadata:
+  name: pmm-missing-it
+spec:
+  classRef:
+    name: pmm
+  credentialsSecretRef:
+    name: pmm-it-token
+  parameters:
+    url: (join('', ['http://pmm-missing.', $namespace, '.svc:8080']))

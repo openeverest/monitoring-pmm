@@ -1,0 +1,89 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fake-pmm
+data:
+  default.conf: |
+    map $http_authorization $pmm_role {
+      default "";
+      "Bearer glsa_chainsaw-token" admin;
+      "Bearer glsa_chainsaw-viewer-token" viewer;
+    }
+    # PMM 3 server: the settings API needs the Admin role.
+    server {
+      listen 8080;
+      location = /v1/version {
+        default_type application/json;
+        if ($pmm_role = "") {
+          return 401 '{"message":"Unauthorized"}';
+        }
+        return 200 '{"version":"3.8.0","server":{"version":"3.8.0"}}';
+      }
+      location = /v1/server/settings {
+        default_type application/json;
+        if ($pmm_role = "") {
+          return 401 '{"message":"Unauthorized"}';
+        }
+        if ($pmm_role != admin) {
+          return 403 '{"message":"Access denied"}';
+        }
+        return 200 '{"settings":{}}';
+      }
+    }
+    # PMM 2 server.
+    server {
+      listen 8081;
+      location = /v1/version {
+        default_type application/json;
+        return 200 '{"version":"2.44.1","server":{"version":"2.44.1"}}';
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-pmm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-pmm
+  template:
+    metadata:
+      labels:
+        app: fake-pmm
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.28-alpine
+          ports:
+            - name: pmm3
+              containerPort: 8080
+            - name: pmm2
+              containerPort: 8081
+          readinessProbe:
+            tcpSocket:
+              port: pmm3
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: config
+          configMap:
+            name: fake-pmm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-pmm
+spec:
+  selector:
+    app: fake-pmm
+  ports:
+    - name: pmm3
+      port: 8080
+      targetPort: pmm3
+    - name: pmm2
+      port: 8081
+      targetPort: pmm2

@@ -1,0 +1,19 @@
+monitoring-pmm is installed in {{ .Release.Namespace }}.
+{{- if .Values.class.create }}
+
+It claims the MonitoringClass "{{ .Values.class.name }}" (pmm-client {{ .Values.class.agentVersion }}):
+
+  kubectl get monitoringclass {{ .Values.class.name }}
+
+To send an Instance's metrics and Query Analytics to a PMM 3 server, in the
+Instance's namespace:
+
+  1. Store a PMM 3 service-account token under the key apiKey:
+       kubectl -n <namespace> create secret generic pmm-prod-token --from-literal=apiKey=<token>
+  2. Create a MonitoringDestination of class "{{ .Values.class.name }}" with parameters.url
+     and credentialsSecretRef pmm-prod-token, and wait until it is Ready:
+       kubectl -n <namespace> get monitoringdestination
+  3. List the destination under the Instance's spec.monitoring.destinations[].
+
+See https://github.com/openeverest/monitoring-pmm#readme for details.
+{{- end }}

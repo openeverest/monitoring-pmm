@@ -1,0 +1,11 @@
+---
+apiVersion: monitoring.openeverest.io/v1alpha1
+kind: MonitoringDestination
+metadata:
+  name: pmm-viewer-it
+status:
+  serverVersion: 3.8.0
+  (conditions[?type == 'Ready']):
+    - status: "False"
+      reason: Unauthorized
+      (contains(message, 'token lacks the Admin role pmm-agent needs')): true

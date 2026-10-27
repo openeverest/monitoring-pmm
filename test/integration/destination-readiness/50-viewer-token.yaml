@@ -1,0 +1,20 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pmm-viewer-it-token
+type: Opaque
+stringData:
+  apiKey: glsa_chainsaw-viewer-token
+---
+apiVersion: monitoring.openeverest.io/v1alpha1
+kind: MonitoringDestination
+metadata:
+  name: pmm-viewer-it
+spec:
+  classRef:
+    name: pmm
+  credentialsSecretRef:
+    name: pmm-viewer-it-token
+  parameters:
+    url: (join('', ['http://fake-pmm.', $namespace, '.svc:8080']))

@@ -1,0 +1,93 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/openeverest/monitoring-pmm
+  pullPolicy: IfNotPresent
+  # Defaults to the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  automountServiceAccountToken: true
+  name: ""
+
+rbac:
+  create: true
+
+# The MonitoringClass this extension claims. The class is cluster-scoped and
+# installed by this chart; destinations reference it by name.
+class:
+  create: true
+  name: pmm
+  displayName: Percona Monitoring and Management
+  # -- (required) pmm-client image the providers run next to each database.
+  # Changing it rolls the database pods of every Instance that sends to a
+  # destination of this class.
+  agentImage: percona/pmm-client:3.8.0
+  # -- (required) Version of agentImage, matched against the pmm-client
+  # versions each provider supports.
+  agentVersion: 3.8.0
+
+# The controller's PMM server check (destination Ready).
+probe:
+  # -- Let the check connect to loopback addresses such as localhost.
+  # Link-local addresses, which include cloud metadata endpoints, are always
+  # refused.
+  allowLoopback: false
+
+podAnnotations: {}
+podLabels: {}
+
+# Pod Security Standard "restricted"; 65532 is the image's nonroot user.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 20m
+    memory: 64Mi
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: probes
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: probes
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+leaderElection:
+  enabled: true
+
+logLevel: info
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+extraEnv: []
