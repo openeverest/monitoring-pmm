@@ -14,7 +14,8 @@ metadata:
 spec:
   classRef:
     name: pmm
-  url: (join('', ['http://fake-pmm.', $namespace, '.svc:8080']))
+  parameters:
+    url: (join('', ['http://fake-pmm.', $namespace, '.svc:8080']))
   authentication:
     mode: ServiceAccountToken
     credentialsSecretRef:

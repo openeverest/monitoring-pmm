@@ -12,7 +12,15 @@ spec:
     integration: pmm
     agentImage: {{ required "class.agentImage is required: the pmm-client image the providers run next to each database, e.g. percona/pmm-client:3.8.0" .Values.class.agentImage | quote }}
     agentVersion: {{ required "class.agentVersion is required: the version of class.agentImage, e.g. 3.8.0" .Values.class.agentVersion | quote }}
-  urlPolicy: Required
+  destinationParametersSchema:
+    openAPIV3Schema:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          pattern: '^https?://[^/?#@]+([/?#].*)?$'
+          description: PMM Server URL, for example https://pmm.example.com, without user information.
   authModes:
     - name: ServiceAccountToken
       credentials:
@@ -43,6 +51,19 @@ spec:
                 pattern: '^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$'
                 x-kubernetes-int-or-string: true
   uiSchema:
+    destination:
+      componentsOrder: [url]
+      components:
+        url:
+          path: parameters.url
+          uiType: text
+          fieldParams:
+            label: PMM server URL
+            placeholder: https://pmm.example.com
+            helperText: PMM 3 server reachable from the cluster; the database pods register with it.
+          validation:
+            required: true
+            url: true
     credentials:
       ServiceAccountToken:
         componentsOrder: [token]

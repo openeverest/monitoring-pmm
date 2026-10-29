@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -53,6 +54,12 @@ const (
 	// maxMessageBytes bounds the Ready condition message.
 	maxMessageBytes = 1 << 10
 )
+
+// destinationParameters is MonitoringDestination.spec.parameters of the pmm
+// class.
+type destinationParameters struct {
+	URL string `json:"url"`
+}
 
 // readiness is the Ready condition and serverVersion of a destination.
 type readiness struct {
@@ -130,9 +137,16 @@ func retryAfter(dst *monitoringv1alpha1.MonitoringDestination) time.Duration {
 }
 
 func (r *DestinationReconciler) check(ctx context.Context, dst *monitoringv1alpha1.MonitoringDestination) (readiness, error) {
-	base, err := baseURL(dst.Spec.URL)
+	params, err := decodeParameters(dst)
 	if err != nil {
 		return invalidParameters(err.Error()), nil
+	}
+	base, err := baseURL(params.URL)
+	if err != nil {
+		return invalidParameters(err.Error()), nil
+	}
+	if base.Scheme != "https" && dst.Spec.TLS != nil {
+		return invalidParameters(fmt.Sprintf("spec.tls is set but parameters.url %q is not https", params.URL)), nil
 	}
 	if mode := dst.Spec.Authentication.Mode; mode != authMode {
 		return invalidParameters(fmt.Sprintf("authentication mode %q is not supported: the PMM server check authenticates with %s only", mode, authMode)), nil
@@ -166,6 +180,17 @@ func (r *DestinationReconciler) check(ctx context.Context, dst *monitoringv1alph
 	httpClient := newHTTPClient(tlsConfig, r.allowLoopback)
 	defer httpClient.CloseIdleConnections()
 	return probe(ctx, httpClient, base, token), nil
+}
+
+func decodeParameters(dst *monitoringv1alpha1.MonitoringDestination) (destinationParameters, error) {
+	params := destinationParameters{}
+	if dst.Spec.Parameters == nil {
+		return params, nil
+	}
+	if err := json.Unmarshal(dst.Spec.Parameters.Raw, &params); err != nil {
+		return params, fmt.Errorf("invalid parameters: %w", err)
+	}
+	return params, nil
 }
 
 // tlsConfig is how the probe verifies the server, from spec.tls. The string

@@ -105,17 +105,17 @@ func allowedAddr(addr netip.Addr, allowLoopback bool) error {
 	return nil
 }
 
-// baseURL parses the destination's spec.url.
+// baseURL parses the destination's url parameter.
 func baseURL(raw string) (*url.URL, error) {
 	if raw == "" {
-		return nil, errors.New("spec.url is not set")
+		return nil, errors.New("parameters.url is not set")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("spec.url: %w", err)
+		return nil, fmt.Errorf("parameters.url: %w", err)
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, fmt.Errorf("spec.url %q is not an http(s) URL", raw)
+		return nil, fmt.Errorf("parameters.url %q is not an http(s) URL", raw)
 	}
 	return u, nil
 }

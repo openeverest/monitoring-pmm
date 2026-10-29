@@ -114,7 +114,6 @@ func pmmClassNamed(name string) *monitoringv1alpha1.MonitoringClass {
 		ObjectMeta: metav1.ObjectMeta{Name: name, Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringClassSpec{
 			ProviderManaged: &monitoringv1alpha1.ProviderManagedFulfilment{Integration: "pmm"},
-			URLPolicy:       monitoringv1alpha1.URLPolicyRequired,
 			AuthModes: []common.AuthMode{{
 				Name:        "ServiceAccountToken",
 				Credentials: &common.CredentialKeys{Required: []string{"token"}},
@@ -137,8 +136,8 @@ func destination(class, url string) *monitoringv1alpha1.MonitoringDestination {
 	return &monitoringv1alpha1.MonitoringDestination{
 		ObjectMeta: metav1.ObjectMeta{Name: testDestination, Namespace: testNamespace, Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringDestinationSpec{
-			ClassRef: common.ObjectRef{Name: class},
-			URL:      url,
+			ClassRef:   common.ObjectRef{Name: class},
+			Parameters: &runtime.RawExtension{Raw: []byte(`{"url":"` + url + `"}`)},
 			Authentication: common.Authentication{
 				Mode:                 "ServiceAccountToken",
 				CredentialsSecretRef: &common.SecretRef{Name: testSecret},
@@ -392,7 +391,7 @@ func TestDestinationReadiness(t *testing.T) {
 			url:         func(*testing.T) string { return "pmm.example.com" },
 			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonReadyInvalidParameters,
-			wantMessage: `spec.url "pmm.example.com" is not an http(s) URL`,
+			wantMessage: `parameters.url "pmm.example.com" is not an http(s) URL`,
 			wantRequeue: time.Minute,
 		},
 		{
@@ -400,7 +399,7 @@ func TestDestinationReadiness(t *testing.T) {
 			url:         func(*testing.T) string { return "" },
 			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonReadyInvalidParameters,
-			wantMessage: "spec.url is not set",
+			wantMessage: "parameters.url is not set",
 			wantRequeue: time.Minute,
 		},
 		{
@@ -620,6 +619,18 @@ func TestDestinationTLS(t *testing.T) {
 			assert.Contains(t, ready.Message, tt.wantMessage)
 		})
 	}
+}
+
+func TestDestinationTLSOverHTTPIsNotProbed(t *testing.T) {
+	t.Parallel()
+	dst := destination("pmm", serve(t, rejectRequests(t)))
+	dst.Spec.TLS = &common.TLSConfig{InsecureSkipVerify: true}
+
+	_, got := reconcile(t, newFakeClient(t, pmmClass(), dst, tokenSecret("token", testToken)))
+
+	ready := readyCondition(t, got)
+	assert.Equal(t, string(monitoringv1alpha1.ReasonReadyInvalidParameters), ready.Reason)
+	assert.Contains(t, ready.Message, "spec.tls is set but parameters.url")
 }
 
 func TestDestinationOfAnotherAuthModeIsNotProbed(t *testing.T) {
