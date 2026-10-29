@@ -7,7 +7,7 @@ metadata:
     {{- include "monitoring-pmm.labels" . | nindent 4 }}
 spec:
   displayName: {{ .Values.class.displayName | quote }}
-  description: Percona Monitoring and Management 3. The database provider runs pmm-client next to each database and registers it with the PMM server (metrics and Query Analytics).
+  description: Percona Monitoring and Management 3. The database provider runs pmm-client next to each database and registers it with the PMM server (metrics and Query Analytics). pmm-client does not verify the PMM server certificate (bindings report AgentTLSNotVerified); a destination's spec.tls applies only to this controller's check of the server.
   providerManaged:
     integration: pmm
     agentImage: {{ required "class.agentImage is required: the pmm-client image the providers run next to each database, e.g. percona/pmm-client:3.8.0" .Values.class.agentImage | quote }}
@@ -19,11 +19,12 @@ spec:
       properties:
         url:
           type: string
-          pattern: '^https?://.+'
-          description: PMM Server URL, for example https://pmm.example.com.
-        verifyTLS:
-          type: boolean
-          description: Verify the PMM Server TLS certificate. Applies to this controller's readiness probe; the agents' TLS behaviour is the operator's. Defaults to true.
+          pattern: '^https?://[^/?#@]+([/?#].*)?$'
+          description: PMM Server URL, for example https://pmm.example.com, without user information.
+  authModes:
+    - name: ServiceAccountToken
+      credentials:
+        required: [token]
   instanceParametersSchema:
     openAPIV3Schema:
       type: object
@@ -49,11 +50,9 @@ spec:
                   - type: string
                 pattern: '^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$'
                 x-kubernetes-int-or-string: true
-  credentialsSchema:
-    required: [apiKey]
   uiSchema:
     destination:
-      componentsOrder: [url, verifyTLS]
+      componentsOrder: [url]
       components:
         url:
           path: parameters.url
@@ -65,26 +64,20 @@ spec:
           validation:
             required: true
             url: true
-        verifyTLS:
-          path: parameters.verifyTLS
-          uiType: toggle
-          fieldParams:
-            label: Verify TLS certificate
-            defaultValue: true
-            helperText: Applies to this controller's readiness check of the server; the agents' TLS behaviour is the database operator's.
     credentials:
-      componentsOrder: [apiKey]
-      components:
-        apiKey:
-          path: apiKey
-          uiType: text
-          fieldParams:
-            label: Service account token
-            type: password
-            placeholder: glsa_...
-            helperText: Token of a PMM service account with the Admin role.
-          validation:
-            required: true
+      ServiceAccountToken:
+        componentsOrder: [token]
+        components:
+          token:
+            path: token
+            uiType: text
+            fieldParams:
+              label: Service account token
+              type: password
+              placeholder: glsa_...
+              helperText: Token of a PMM service account with the Admin role.
+            validation:
+              required: true
     instance:
       componentsOrder: [resources]
       components:

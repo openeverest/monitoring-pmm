@@ -48,7 +48,7 @@ type versionResponse struct {
 
 // newHTTPClient returns the client the probe connects with. It follows no
 // redirects, so the token is only ever sent to the destination's own URL.
-func newHTTPClient(verifyTLS, allowLoopback bool) *http.Client {
+func newHTTPClient(tlsConfig *tls.Config, allowLoopback bool) *http.Client {
 	return &http.Client{
 		Timeout: probeTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -58,10 +58,7 @@ func newHTTPClient(verifyTLS, allowLoopback bool) *http.Client {
 			DialContext:         guardedDial(&net.Dialer{Timeout: probeTimeout}, allowLoopback),
 			TLSHandshakeTimeout: probeTimeout,
 			IdleConnTimeout:     90 * time.Second,
-			TLSClientConfig: &tls.Config{
-				MinVersion:         tls.VersionTLS12,
-				InsecureSkipVerify: !verifyTLS, //nolint:gosec // verifyTLS: false is the destination owner's explicit choice
-			},
+			TLSClientConfig:     tlsConfig,
 		},
 	}
 }

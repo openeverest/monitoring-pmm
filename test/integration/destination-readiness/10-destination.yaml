@@ -5,7 +5,7 @@ metadata:
   name: pmm-it-token
 type: Opaque
 stringData:
-  apiKey: glsa_chainsaw-token
+  token: glsa_chainsaw-token
 ---
 apiVersion: monitoring.openeverest.io/v1alpha1
 kind: MonitoringDestination
@@ -14,7 +14,9 @@ metadata:
 spec:
   classRef:
     name: pmm
-  credentialsSecretRef:
-    name: pmm-it-token
   parameters:
     url: (join('', ['http://fake-pmm.', $namespace, '.svc:8080']))
+  authentication:
+    mode: ServiceAccountToken
+    credentialsSecretRef:
+      name: pmm-it-token

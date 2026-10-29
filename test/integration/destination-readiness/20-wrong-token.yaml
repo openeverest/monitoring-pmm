@@ -1,13 +1,13 @@
 ---
 # Rotating the token alone is picked up by the periodic re-probe; changing the
-# destination as well re-probes it at once.
+# destination's url as well (a trailing slash) re-probes it at once.
 apiVersion: v1
 kind: Secret
 metadata:
   name: pmm-it-token
 type: Opaque
 stringData:
-  apiKey: glsa_revoked-token
+  token: glsa_revoked-token
 ---
 apiVersion: monitoring.openeverest.io/v1alpha1
 kind: MonitoringDestination
@@ -16,8 +16,9 @@ metadata:
 spec:
   classRef:
     name: pmm
-  credentialsSecretRef:
-    name: pmm-it-token
   parameters:
-    url: (join('', ['http://fake-pmm.', $namespace, '.svc:8080']))
-    verifyTLS: true
+    url: (join('', ['http://fake-pmm.', $namespace, '.svc:8080/']))
+  authentication:
+    mode: ServiceAccountToken
+    credentialsSecretRef:
+      name: pmm-it-token

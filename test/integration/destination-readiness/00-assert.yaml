@@ -26,6 +26,10 @@ spec:
     integration: pmm
     agentImage: percona/pmm-client:3.8.0
     agentVersion: 3.8.0
+  authModes:
+    - name: ServiceAccountToken
+      credentials:
+        required: [token]
 status:
   (conditions[?type == 'Accepted']):
     - status: "True"

@@ -16,6 +16,7 @@ package controller_test
 
 import (
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -113,6 +114,10 @@ func pmmClassNamed(name string) *monitoringv1alpha1.MonitoringClass {
 		ObjectMeta: metav1.ObjectMeta{Name: name, Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringClassSpec{
 			ProviderManaged: &monitoringv1alpha1.ProviderManagedFulfilment{Integration: "pmm"},
+			AuthModes: []common.AuthMode{{
+				Name:        "ServiceAccountToken",
+				Credentials: &common.CredentialKeys{Required: []string{"token"}},
+			}},
 		},
 	}
 }
@@ -122,20 +127,21 @@ func prometheusClass() *monitoringv1alpha1.MonitoringClass {
 		ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringClassSpec{
 			ExtensionManaged: &monitoringv1alpha1.ExtensionManagedFulfilment{},
+			AuthModes:        []common.AuthMode{{Name: common.AuthModeAnonymous}},
 		},
 	}
 }
 
-func destination(t *testing.T, class string, params map[string]any) *monitoringv1alpha1.MonitoringDestination {
-	t.Helper()
-	raw, err := json.Marshal(params)
-	require.NoError(t, err)
+func destination(class, url string) *monitoringv1alpha1.MonitoringDestination {
 	return &monitoringv1alpha1.MonitoringDestination{
 		ObjectMeta: metav1.ObjectMeta{Name: testDestination, Namespace: testNamespace, Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringDestinationSpec{
-			ClassRef:             common.ObjectRef{Name: class},
-			CredentialsSecretRef: &common.SecretRef{Name: testSecret},
-			Parameters:           &runtime.RawExtension{Raw: raw},
+			ClassRef:   common.ObjectRef{Name: class},
+			Parameters: &runtime.RawExtension{Raw: []byte(`{"url":"` + url + `"}`)},
+			Authentication: common.Authentication{
+				Mode:                 "ServiceAccountToken",
+				CredentialsSecretRef: &common.SecretRef{Name: testSecret},
+			},
 		},
 	}
 }
@@ -225,8 +231,8 @@ func TestDestinationReadiness(t *testing.T) {
 		return s.URL
 	}
 	unexpectedServer := func(t *testing.T) string { t.Helper(); return serve(t, rejectRequests(t)) }
-	server := func(h http.Handler) func(t *testing.T) any {
-		return func(t *testing.T) any { t.Helper(); return serve(t, h) }
+	server := func(h http.Handler) func(t *testing.T) string {
+		return func(t *testing.T) string { t.Helper(); return serve(t, h) }
 	}
 	oversized := `{"version":"3.8.0","padding":"` + strings.Repeat("x", 70<<10) + `"}`
 	settingsFailing := http.NewServeMux()
@@ -235,7 +241,7 @@ func TestDestinationReadiness(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		url         func(t *testing.T) any
+		url         func(t *testing.T) string
 		secret      *corev1.Secret
 		wantReason  monitoringv1alpha1.ReadyReason
 		wantMessage string
@@ -246,7 +252,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "PMM 3 server accepting the token",
 			url:         server(pmmServer("3.8.0")),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonReady,
 			wantMessage: "PMM server 3.8.0 is reachable and the token has the Admin role pmm-agent needs",
 			wantVersion: "3.8.0",
@@ -255,7 +261,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "token without the Admin role",
 			url:         server(pmmServer("3.8.0")),
-			secret:      tokenSecret("apiKey", testViewerToken),
+			secret:      tokenSecret("token", testViewerToken),
 			wantReason:  monitoringv1alpha1.ReasonUnauthorized,
 			wantMessage: "token lacks the Admin role pmm-agent needs: GET http://127.0.0.1",
 			wantVersion: "3.8.0",
@@ -264,7 +270,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "settings API failing",
 			url:         server(settingsFailing),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "/v1/server/settings returned HTTP 500",
 			notMessage:  "internal details",
@@ -274,7 +280,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "token with a trailing newline",
 			url:         server(pmmServer("3.8.0")),
-			secret:      tokenSecret("apiKey", testToken+"\n"),
+			secret:      tokenSecret("token", testToken+"\n"),
 			wantReason:  monitoringv1alpha1.ReasonReady,
 			wantMessage: "PMM server 3.8.0 is reachable",
 			wantVersion: "3.8.0",
@@ -283,7 +289,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "token rejected",
 			url:         server(pmmServer("3.8.0")),
-			secret:      tokenSecret("apiKey", "glsa_revoked"),
+			secret:      tokenSecret("token", "glsa_revoked"),
 			wantReason:  monitoringv1alpha1.ReasonUnauthorized,
 			wantMessage: "HTTP 401",
 			wantRequeue: time.Minute,
@@ -291,7 +297,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "PMM 2 server",
 			url:         server(pmmServer("2.44.1")),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnsupportedServerVersion,
 			wantMessage: "PMM server 2.44.1 is not supported",
 			wantVersion: "2.44.1",
@@ -300,7 +306,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "major version only",
 			url:         server(pmmServer("3")),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "did not return a PMM server version",
 			wantRequeue: time.Minute,
@@ -308,7 +314,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "version that is not semver",
 			url:         server(pmmServer("3.x")),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "did not return a PMM server version",
 			wantRequeue: time.Minute,
@@ -316,7 +322,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "empty version",
 			url:         server(pmmServer("")),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "did not return a PMM server version",
 			wantRequeue: time.Minute,
@@ -324,7 +330,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "HTML login page",
 			url:         server(reply(http.StatusOK, "<html><body>Sign in</body></html>")),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "did not return a PMM server version",
 			notMessage:  "Sign in",
@@ -333,7 +339,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "malformed JSON",
 			url:         server(reply(http.StatusOK, `{"version":"3.8.0"`)),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "did not return a PMM server version",
 			wantRequeue: time.Minute,
@@ -341,7 +347,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "reply over 64 KiB",
 			url:         server(reply(http.StatusOK, oversized)),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "did not return a PMM server version",
 			wantRequeue: time.Minute,
@@ -349,7 +355,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "redirect",
 			url:         server(http.RedirectHandler("https://pmm.attacker.example/steal?token=1", http.StatusFound)),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "HTTP 302: server redirected to pmm.attacker.example; redirects are not followed",
 			notMessage:  "steal",
@@ -358,7 +364,7 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "server error",
 			url:         server(reply(http.StatusInternalServerError, "stack trace with internal details")),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "HTTP 500",
 			notMessage:  "internal details",
@@ -367,55 +373,55 @@ func TestDestinationReadiness(t *testing.T) {
 		{
 			name:        "not a PMM server",
 			url:         server(http.NotFoundHandler()),
-			secret:      tokenSecret("apiKey", testToken),
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "HTTP 404",
 			wantRequeue: time.Minute,
 		},
 		{
 			name:        "connection refused",
-			url:         func(t *testing.T) any { t.Helper(); return closedServer(t) },
-			secret:      tokenSecret("apiKey", testToken),
+			url:         closedServer,
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnreachable,
 			wantMessage: "connection refused",
 			wantRequeue: time.Minute,
 		},
 		{
 			name:        "URL without a scheme",
-			url:         func(*testing.T) any { return "pmm.example.com" },
-			secret:      tokenSecret("apiKey", testToken),
+			url:         func(*testing.T) string { return "pmm.example.com" },
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonReadyInvalidParameters,
-			wantMessage: `"pmm.example.com" is not an http(s) URL`,
+			wantMessage: `parameters.url "pmm.example.com" is not an http(s) URL`,
 			wantRequeue: time.Minute,
 		},
 		{
-			name:        "URL that is not a string",
-			url:         func(*testing.T) any { return 8443 },
-			secret:      tokenSecret("apiKey", testToken),
+			name:        "URL not set",
+			url:         func(*testing.T) string { return "" },
+			secret:      tokenSecret("token", testToken),
 			wantReason:  monitoringv1alpha1.ReasonReadyInvalidParameters,
-			wantMessage: "invalid parameters",
+			wantMessage: "parameters.url is not set",
 			wantRequeue: time.Minute,
 		},
 		{
 			name:        "credentials Secret missing",
-			url:         func(t *testing.T) any { t.Helper(); return unexpectedServer(t) },
+			url:         unexpectedServer,
 			wantReason:  monitoringv1alpha1.ReasonUnauthorized,
 			wantMessage: `credentials Secret "pmm-prod-token" not found`,
 			wantRequeue: time.Minute,
 		},
 		{
-			name:        "credentials Secret without apiKey",
-			url:         func(t *testing.T) any { t.Helper(); return unexpectedServer(t) },
-			secret:      tokenSecret("token", testToken),
+			name:        "credentials Secret without token",
+			url:         unexpectedServer,
+			secret:      tokenSecret("apiKey", testToken),
 			wantReason:  monitoringv1alpha1.ReasonUnauthorized,
-			wantMessage: `credentials Secret "pmm-prod-token" has no "apiKey" key`,
+			wantMessage: `credentials Secret "pmm-prod-token" has no "token" key`,
 			wantRequeue: time.Minute,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			objs := []client.Object{pmmClass(), destination(t, "pmm", map[string]any{"url": tt.url(t)})}
+			objs := []client.Object{pmmClass(), destination("pmm", tt.url(t))}
 			if tt.secret != nil {
 				objs = append(objs, tt.secret)
 			}
@@ -454,7 +460,7 @@ func TestDestinationRetryBacksOffWhileFailing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			dst := destination(t, "pmm", map[string]any{"url": serve(t, pmmServer("3.8.0"))})
+			dst := destination("pmm", serve(t, pmmServer("3.8.0")))
 			if tt.previous != "" {
 				dst.Status.Conditions = []metav1.Condition{{
 					Type:               monitoringv1alpha1.MonitoringDestinationConditionReady,
@@ -464,7 +470,7 @@ func TestDestinationRetryBacksOffWhileFailing(t *testing.T) {
 				}}
 			}
 
-			res, got := reconcile(t, newFakeClient(t, pmmClass(), dst, tokenSecret("apiKey", "glsa_revoked")))
+			res, got := reconcile(t, newFakeClient(t, pmmClass(), dst, tokenSecret("token", "glsa_revoked")))
 
 			assert.Equal(t, string(monitoringv1alpha1.ReasonUnauthorized), readyCondition(t, got).Reason)
 			assert.InDelta(t, float64(tt.want), float64(res.RequeueAfter), float64(5*time.Second))
@@ -496,7 +502,7 @@ func TestDestinationProbeRefusesAddresses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newFakeClient(t, pmmClass(), destination(t, "pmm", map[string]any{"url": tt.url(t)}), tokenSecret("apiKey", testToken))
+			c := newFakeClient(t, pmmClass(), destination("pmm", tt.url(t)), tokenSecret("token", testToken))
 
 			res, dst := reconcileWith(t, c, controller.Options{ClassName: "pmm"})
 
@@ -512,7 +518,7 @@ func TestDestinationProbeRefusesAddresses(t *testing.T) {
 func TestDestinationProbeReachesLoopbackWhenAllowed(t *testing.T) {
 	t.Parallel()
 	url := strings.Replace(serve(t, pmmServer("3.8.0")), "127.0.0.1", "localhost", 1)
-	c := newFakeClient(t, pmmClass(), destination(t, "pmm", map[string]any{"url": url}), tokenSecret("apiKey", testToken))
+	c := newFakeClient(t, pmmClass(), destination("pmm", url), tokenSecret("token", testToken))
 
 	_, dst := reconcileWith(t, c, controller.Options{ClassName: "pmm", AllowLoopback: true})
 
@@ -523,7 +529,7 @@ func TestDestinationProbeReachesLoopbackWhenAllowed(t *testing.T) {
 func TestDestinationReadyMessageIsTruncated(t *testing.T) {
 	t.Parallel()
 	url := serve(t, http.NotFoundHandler()) + "/" + strings.Repeat("a", 2<<10)
-	c := newFakeClient(t, pmmClass(), destination(t, "pmm", map[string]any{"url": url}), tokenSecret("apiKey", testToken))
+	c := newFakeClient(t, pmmClass(), destination("pmm", url), tokenSecret("token", testToken))
 
 	_, dst := reconcile(t, c)
 
@@ -533,41 +539,117 @@ func TestDestinationReadyMessageIsTruncated(t *testing.T) {
 	assert.True(t, strings.HasSuffix(ready.Message, "..."), ready.Message)
 }
 
-func TestDestinationVerifyTLS(t *testing.T) {
+func TestDestinationTLS(t *testing.T) {
 	t.Parallel()
 
+	caRef := &common.CABundleSource{SecretKeyRef: &common.SecretKeyRef{Name: "pmm-ca", Key: "ca.crt"}}
+	serverCA := func(s *httptest.Server) []byte {
+		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Certificate().Raw})
+	}
+
 	tests := []struct {
-		name       string
-		params     map[string]any
-		wantReason monitoringv1alpha1.ReadyReason
+		name        string
+		tls         *common.TLSConfig
+		caSecret    func(s *httptest.Server) map[string][]byte
+		wantReason  monitoringv1alpha1.ReadyReason
+		wantMessage string
 	}{
-		{name: "verification disabled", params: map[string]any{"verifyTLS": false}, wantReason: monitoringv1alpha1.ReasonReady},
-		{name: "verification enabled", params: map[string]any{"verifyTLS": true}, wantReason: monitoringv1alpha1.ReasonUnreachable},
-		{name: "verification by default", params: map[string]any{}, wantReason: monitoringv1alpha1.ReasonUnreachable},
+		{
+			name:        "system trust store by default",
+			wantReason:  monitoringv1alpha1.ReasonUnreachable,
+			wantMessage: "certificate signed by unknown authority",
+		},
+		{
+			name:        "verification skipped",
+			tls:         &common.TLSConfig{InsecureSkipVerify: true},
+			wantReason:  monitoringv1alpha1.ReasonReady,
+			wantMessage: "PMM server 3.8.0 is reachable",
+		},
+		{
+			name:        "CA bundle of the server",
+			tls:         &common.TLSConfig{CA: caRef},
+			caSecret:    func(s *httptest.Server) map[string][]byte { return map[string][]byte{"ca.crt": serverCA(s)} },
+			wantReason:  monitoringv1alpha1.ReasonReady,
+			wantMessage: "PMM server 3.8.0 is reachable",
+		},
+		{
+			name:        "CA Secret missing",
+			tls:         &common.TLSConfig{CA: caRef},
+			wantReason:  monitoringv1alpha1.ReasonReadyInvalidParameters,
+			wantMessage: `CA bundle key "ca.crt" of Secret "pmm-ca": Secret not found`,
+		},
+		{
+			name:        "CA key missing",
+			tls:         &common.TLSConfig{CA: caRef},
+			caSecret:    func(s *httptest.Server) map[string][]byte { return map[string][]byte{"tls.crt": serverCA(s)} },
+			wantReason:  monitoringv1alpha1.ReasonReadyInvalidParameters,
+			wantMessage: `CA bundle key "ca.crt" of Secret "pmm-ca": key not found`,
+		},
+		{
+			name:        "CA bundle that is not PEM",
+			tls:         &common.TLSConfig{CA: caRef},
+			caSecret:    func(*httptest.Server) map[string][]byte { return map[string][]byte{"ca.crt": []byte("not a bundle")} },
+			wantReason:  monitoringv1alpha1.ReasonReadyInvalidParameters,
+			wantMessage: `CA bundle key "ca.crt" of Secret "pmm-ca": no PEM certificate found`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			s := httptest.NewTLSServer(pmmServer("3.8.0"))
-			t.Cleanup(s.Close)
-			tt.params["url"] = s.URL
-
-			_, dst := reconcile(t, newFakeClient(t, pmmClass(), destination(t, "pmm", tt.params), tokenSecret("apiKey", testToken)))
-
-			ready := readyCondition(t, dst)
-			assert.Equal(t, string(tt.wantReason), ready.Reason)
-			if tt.wantReason == monitoringv1alpha1.ReasonUnreachable {
-				assert.Contains(t, ready.Message, "certificate")
+			handler := pmmServer("3.8.0")
+			if tt.wantReason == monitoringv1alpha1.ReasonReadyInvalidParameters {
+				handler = rejectRequests(t)
 			}
+			s := httptest.NewTLSServer(handler)
+			t.Cleanup(s.Close)
+			dst := destination("pmm", s.URL)
+			dst.Spec.TLS = tt.tls
+			objs := []client.Object{pmmClass(), dst, tokenSecret("token", testToken)}
+			if tt.caSecret != nil {
+				objs = append(objs, &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "pmm-ca", Namespace: testNamespace},
+					Data:       tt.caSecret(s),
+				})
+			}
+
+			_, got := reconcile(t, newFakeClient(t, objs...))
+
+			ready := readyCondition(t, got)
+			assert.Equal(t, string(tt.wantReason), ready.Reason)
+			assert.Contains(t, ready.Message, tt.wantMessage)
 		})
 	}
+}
+
+func TestDestinationTLSOverHTTPIsNotProbed(t *testing.T) {
+	t.Parallel()
+	dst := destination("pmm", serve(t, rejectRequests(t)))
+	dst.Spec.TLS = &common.TLSConfig{InsecureSkipVerify: true}
+
+	_, got := reconcile(t, newFakeClient(t, pmmClass(), dst, tokenSecret("token", testToken)))
+
+	ready := readyCondition(t, got)
+	assert.Equal(t, string(monitoringv1alpha1.ReasonReadyInvalidParameters), ready.Reason)
+	assert.Contains(t, ready.Message, "spec.tls is set but parameters.url")
+}
+
+func TestDestinationOfAnotherAuthModeIsNotProbed(t *testing.T) {
+	t.Parallel()
+	dst := destination("pmm", serve(t, rejectRequests(t)))
+	dst.Spec.Authentication.Mode = "BasicAuth"
+
+	res, got := reconcile(t, newFakeClient(t, pmmClass(), dst, tokenSecret("token", testToken)))
+
+	ready := readyCondition(t, got)
+	assert.Equal(t, string(monitoringv1alpha1.ReasonReadyInvalidParameters), ready.Reason)
+	assert.Equal(t, `authentication mode "BasicAuth" is not supported: the PMM server check authenticates with ServiceAccountToken only`, ready.Message)
+	assert.Equal(t, time.Minute, res.RequeueAfter)
 }
 
 func TestDestinationReadyKeepsAcceptedAndServerVersion(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	c := newFakeClient(t, pmmClass(), destination(t, "pmm", map[string]any{"url": serve(t, pmmServer("3.8.0"))}),
-		tokenSecret("apiKey", testToken))
+	c := newFakeClient(t, pmmClass(), destination("pmm", serve(t, pmmServer("3.8.0"))), tokenSecret("token", testToken))
 
 	dst := &monitoringv1alpha1.MonitoringDestination{}
 	require.NoError(t, c.Get(ctx, destinationKey(), dst))
@@ -579,7 +661,7 @@ func TestDestinationReadyKeepsAcceptedAndServerVersion(t *testing.T) {
 
 	secret := &corev1.Secret{}
 	require.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: testNamespace, Name: testSecret}, secret))
-	secret.Data["apiKey"] = []byte("glsa_rotated")
+	secret.Data["token"] = []byte("glsa_rotated")
 	require.NoError(t, c.Update(ctx, secret))
 
 	_, dst = reconcile(t, c)
@@ -607,7 +689,7 @@ func TestDestinationOfOtherClassIsLeftAlone(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			res, dst := reconcile(t, newFakeClient(t, pmmClass(), prometheusClass(),
-				destination(t, tt.class, map[string]any{"url": serve(t, rejectRequests(t))}), tokenSecret("apiKey", testToken)))
+				destination(tt.class, serve(t, rejectRequests(t))), tokenSecret("token", testToken)))
 
 			assert.Zero(t, res.RequeueAfter)
 			assert.Empty(t, dst.Status.Conditions)

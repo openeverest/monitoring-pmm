@@ -21,8 +21,9 @@ package controller
 // +kubebuilder:rbac:groups=monitoring.openeverest.io,resources=monitoringclasses;monitoringdestinations,verbs=get;list;watch
 // +kubebuilder:rbac:groups=monitoring.openeverest.io,resources=monitoringclasses/status;monitoringdestinations/status,verbs=patch
 
-// The destination Secret carries the PMM token the probe authenticates with.
-// It is read on demand, never listed, watched or cached. monitoring-pmm is the
-// one monitoring extension that reads destination Secrets; it never reads
-// Instance credentials.
+// A destination's Secrets carry the PMM token the probe authenticates with
+// and the CA bundle it verifies the server against. They are read on demand,
+// never listed, watched or cached. monitoring-pmm is the one monitoring
+// extension that reads destination Secrets; it never reads Instance
+// credentials.
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get

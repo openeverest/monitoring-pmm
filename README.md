@@ -20,7 +20,7 @@ It installs the `pmm` `MonitoringClass` and its controller. Instances whose prov
 `pmm` is a **ProviderManaged** class: the database provider renders the engine operator's native PMM integration itself, so nothing in this repository touches database pods. This controller only validates the PMM server and token behind each destination and, through the class, owns the pmm-client image the providers run.
 
 - **This controller** claims the MonitoringClass named by `class.name` (`--class-name`) and sets `Accepted=True` on it; any other class is left unclaimed. It keeps the `Ready` condition and `status.serverVersion` of every destination of that class current by calling the PMM server's version API and its settings API, which only the Admin role reads, with the destination's token. It re-checks a `Ready` destination every 5 minutes. A failing one is re-checked after as long as it has been failing, at least every minute and at most every 5 minutes. Those periodic checks also pick up a rotated token; a change to the destination or the class re-checks it immediately.
-- **The provider** renders pmm-client for every Instance entry that points at a `pmm` destination: the image is the class's `agentImage`, the server is the destination's `url`, the token is copied from the destination Secret into the secret the Percona operator reads it from, and the container resources are the Instance size tier merged with the entry's `parameters.resources`. The Percona operator then runs pmm-client as a sidecar of the database pods, which registers them with PMM (metrics and Query Analytics). Adding, removing or changing the agent restarts the database pods one at a time.
+- **The provider** renders pmm-client for every Instance entry that points at a `pmm` destination: the image is the class's `agentImage`, the server is the destination's `parameters.url`, the token is copied from the destination Secret into the secret the Percona operator reads it from, and the container resources are the Instance size tier merged with the entry's `parameters.resources`. The Percona operator then runs pmm-client as a sidecar of the database pods, which registers them with PMM (metrics and Query Analytics). Adding, removing or changing the agent restarts the database pods one at a time.
 - **provider-runtime** reports whether that worked on the `MonitoringBinding` (`Configured`) and in the Instance's `MonitoringConfigured` condition.
 
 The controller writes the class's `Accepted` condition and each destination's `Ready` condition and `status.serverVersion`, and nothing else: it creates no objects and never writes a binding, an Instance or a Secret.
@@ -68,10 +68,10 @@ curl -fsS -u admin:<password> -H 'Content-Type: application/json' \
 
 ### 2. Store the token in a Secret
 
-Create it in the namespace of the Instances to monitor, under the key `apiKey`:
+Create it in the namespace of the Instances to monitor, under the key `token`:
 
 ```sh
-kubectl -n team-a create secret generic pmm-prod-token --from-literal=apiKey=glsa_...
+kubectl -n team-a create secret generic pmm-prod-token --from-literal=token=glsa_...
 ```
 
 Several destinations, of any class, may share a Secret.
@@ -87,17 +87,23 @@ metadata:
 spec:
   classRef:
     name: pmm
-  credentialsSecretRef:
-    name: pmm-prod-token
   parameters:
     url: https://pmm.example.com
-    verifyTLS: true
+  authentication:
+    mode: ServiceAccountToken
+    credentialsSecretRef:
+      name: pmm-prod-token
 ```
 
-| Parameter | Required | Description |
+| Field | Required | Description |
 |---|---|---|
-| `url` | yes | PMM server URL, `http://` or `https://`, for example `https://pmm.example.com`. |
-| `verifyTLS` | no | Verify the server's TLS certificate when this controller checks the server. Defaults to `true`; set `false` only for a self-signed PMM server. The agents' TLS behaviour is the database operator's, not this parameter's. |
+| `parameters.url` | yes | PMM server URL, `http://` or `https://`, for example `https://pmm.example.com`, without user information. |
+| `authentication.mode` | yes | `ServiceAccountToken`, the class's only mode. |
+| `authentication.credentialsSecretRef` | yes | The Secret holding the token under the key `token`. |
+| `tls.ca.secretKeyRef` | no | A Secret key holding the PEM CA bundle the server certificate is verified against, for a PMM server behind a private CA. |
+| `tls.insecureSkipVerify` | no | Do not verify the server certificate. Only for a self-signed PMM server; it cannot be set together with `tls.ca`. `tls` applies to `https://` URLs only. |
+
+`tls` applies to this controller's check of the server only. pmm-client, as the database operators run it, does not verify the PMM server certificate whatever `tls` says, and every binding to a `pmm` destination reports `Configured=True` with the reason `AgentTLSNotVerified` to say so.
 
 ```sh
 kubectl -n team-a get monitoringdestination pmm-prod
@@ -128,7 +134,7 @@ spec:
 
 | Condition | Written by | Meaning |
 |---|---|---|
-| `Accepted` | OpenEverest core | The class exists, `parameters` match the class schema and the Secret carries `apiKey` (`ClassNotFound`, `InvalidParameters`, `CredentialsNotFound`). |
+| `Accepted` | OpenEverest core | The class exists, `parameters` match the class schema, the mode is `ServiceAccountToken`, the Secret carries `token` and the CA bundle, if any, parses (`ClassNotFound`, `InvalidParameters`, `AuthModeUnsupported`, `CredentialsNotFound`, `InvalidCABundle`). |
 | `Ready` | this controller | The PMM server was reachable and the token has the Admin role. |
 
 `Ready` reasons:
@@ -136,9 +142,9 @@ spec:
 | Reason | Status | Cause |
 |---|---|---|
 | `Ready` | True | PMM 3 answered with its version and served its settings, which only the Admin role reads. |
-| `Unauthorized` | False | PMM rejected the token (HTTP 401 or 403), the token lacks the Admin role pmm-agent needs (the settings API answered 401 or 403), or there is no token to send: no `credentialsSecretRef`, the Secret does not exist or has no `apiKey` key. |
+| `Unauthorized` | False | PMM rejected the token (HTTP 401 or 403), the token lacks the Admin role pmm-agent needs (the settings API answered 401 or 403), or there is no token to send: no `authentication.credentialsSecretRef`, the Secret does not exist or has no `token` key. |
 | `UnsupportedServerVersion` | False | The server is not PMM 3 (`serverVersion` shows what it is). |
-| `InvalidParameters` | False | `parameters` cannot be decoded, or `url` is missing or not an `http://` or `https://` URL with a host. |
+| `InvalidParameters` | False | `parameters.url` is missing or not an `http://` or `https://` URL with a host, `tls` is set on an `http://` URL, the mode is not `ServiceAccountToken`, or the CA Secret or key named by `tls.ca` is missing or not a PEM bundle. |
 | `Unreachable` | False | Connection, DNS or TLS error, an address the check refuses (see [Server check limits](#server-check-limits)), a redirect, an unexpected HTTP status, or a reply that is not a PMM version. |
 | `Pending` | Unknown | Not checked yet: the controller is not running or has not reached this destination yet. |
 
@@ -146,9 +152,9 @@ spec:
 
 ### Server check limits
 
-A destination can name any Secret in its namespace, and the check sends that Secret's `apiKey` to the destination's `url`. Creating or updating a `pmm` destination is therefore a privileged action: grant it only to those trusted with the Secrets of that namespace. The check itself is limited so that a destination cannot turn it against the cluster:
+A destination can name any Secret in its namespace, and the check sends that Secret's `token` to the destination's `parameters.url`. Creating or updating a `pmm` destination is therefore a privileged action: grant it only to those trusted with the Secrets of that namespace. The check itself is limited so that a destination cannot turn it against the cluster:
 
-- `url` must be `http://` or `https://` with a host.
+- `parameters.url` must be `http://` or `https://` with a host.
 - Redirects are not followed: a 3xx reply is `Unreachable` and its message names only the target host. No HTTP proxy is used.
 - The controller resolves the host itself and does not connect if any of its addresses is link-local (`169.254.0.0/16`, `fe80::/10`, which include cloud metadata endpoints) or unspecified (`0.0.0.0`, `::`). Loopback addresses (`127.0.0.0/8`, `::1`, `localhost`) are refused too unless the chart value `probe.allowLoopback` is `true`, for a PMM server running next to the controller in development.
 - At most 64 KiB of a reply is read. Reply bodies and headers, apart from a redirect's target host, never reach the condition, whose message is capped at 1 KiB.

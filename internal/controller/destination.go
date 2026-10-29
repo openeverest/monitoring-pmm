@@ -16,9 +16,9 @@ package controller
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -35,13 +35,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	common "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	monitoringv1alpha1 "github.com/openeverest/openeverest/v2/api/monitoring/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/monitoring"
 )
 
-// credentialsKey is the destination Secret key holding the PMM 3
-// service-account token.
-const credentialsKey = "apiKey"
+const (
+	// authMode is the pmm class's only authentication mode.
+	authMode = "ServiceAccountToken"
+	// credentialsKey is the credentials Secret key holding the PMM 3
+	// service-account token.
+	credentialsKey = "token"
+)
 
 const (
 	recheckInterval = 5 * time.Minute
@@ -53,8 +58,7 @@ const (
 // destinationParameters is MonitoringDestination.spec.parameters of the pmm
 // class.
 type destinationParameters struct {
-	URL       string `json:"url"`
-	VerifyTLS *bool  `json:"verifyTLS,omitempty"` //nolint:tagliatelle // parameter name is part of the class schema
+	URL string `json:"url"`
 }
 
 // readiness is the Ready condition and serverVersion of a destination.
@@ -68,28 +72,26 @@ type readiness struct {
 // the class this controller serves and reports the result as the
 // destination's Ready condition and serverVersion.
 type DestinationReconciler struct {
-	client    client.Client
-	secrets   client.Reader
-	classes   monitoring.ClassController
-	verifying *http.Client
-	insecure  *http.Client
+	client        client.Client
+	secrets       client.Reader
+	classes       monitoring.ClassController
+	allowLoopback bool
 }
 
 // NewDestinationReconciler reads destination Secrets through secrets, so the
 // manager need not cache or watch any Secret.
 func NewDestinationReconciler(c client.Client, secrets client.Reader, opts Options) *DestinationReconciler {
 	return &DestinationReconciler{
-		client:    c,
-		secrets:   secrets,
-		classes:   monitoring.ClassController{Client: c, FieldOwner: FieldOwner, ClassName: opts.ClassName},
-		verifying: newHTTPClient(true, opts.AllowLoopback),
-		insecure:  newHTTPClient(false, opts.AllowLoopback),
+		client:        c,
+		secrets:       secrets,
+		classes:       monitoring.ClassController{Client: c, FieldOwner: FieldOwner, ClassName: opts.ClassName},
+		allowLoopback: opts.AllowLoopback,
 	}
 }
 
 // SetupWithManager re-probes a destination when its spec or its class
 // changes, and periodically after that, backing off while it keeps failing;
-// the periodic probe also picks up a rotated token.
+// the periodic probe also picks up a rotated token or CA bundle.
 func (r *DestinationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("monitoring-pmm-destination").
@@ -143,28 +145,40 @@ func (r *DestinationReconciler) check(ctx context.Context, dst *monitoringv1alph
 	if err != nil {
 		return invalidParameters(err.Error()), nil
 	}
+	if base.Scheme != "https" && dst.Spec.TLS != nil {
+		return invalidParameters(fmt.Sprintf("spec.tls is set but parameters.url %q is not https", params.URL)), nil
+	}
+	if mode := dst.Spec.Authentication.Mode; mode != authMode {
+		return invalidParameters(fmt.Sprintf("authentication mode %q is not supported: the PMM server check authenticates with %s only", mode, authMode)), nil
+	}
+	tlsConfig, invalid, err := r.tlsConfig(ctx, dst)
+	if err != nil {
+		return readiness{}, err
+	}
+	if invalid != "" {
+		return invalidParameters(invalid), nil
+	}
 
 	// Without a token there is nothing to authenticate with: Ready=False,
 	// Unauthorized, next to core's Accepted=False, CredentialsNotFound.
-	if dst.Spec.CredentialsSecretRef == nil {
-		return unauthorized("spec.credentialsSecretRef is not set"), nil
+	ref := dst.Spec.Authentication.CredentialsSecretRef
+	if ref == nil {
+		return unauthorized("spec.authentication.credentialsSecretRef is not set"), nil
 	}
 	secret := &corev1.Secret{}
-	if err := r.secrets.Get(ctx, client.ObjectKey{Namespace: dst.Namespace, Name: dst.Spec.CredentialsSecretRef.Name}, secret); err != nil {
+	if err := r.secrets.Get(ctx, client.ObjectKey{Namespace: dst.Namespace, Name: ref.Name}, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			return unauthorized(fmt.Sprintf("credentials Secret %q not found", dst.Spec.CredentialsSecretRef.Name)), nil
+			return unauthorized(fmt.Sprintf("credentials Secret %q not found", ref.Name)), nil
 		}
-		return readiness{}, fmt.Errorf("get credentials Secret %q: %w", dst.Spec.CredentialsSecretRef.Name, err)
+		return readiness{}, fmt.Errorf("get credentials Secret %q: %w", ref.Name, err)
 	}
 	token := strings.TrimSpace(string(secret.Data[credentialsKey]))
 	if token == "" {
 		return unauthorized(fmt.Sprintf("credentials Secret %q has no %q key", secret.Name, credentialsKey)), nil
 	}
 
-	httpClient := r.verifying
-	if params.VerifyTLS != nil && !*params.VerifyTLS {
-		httpClient = r.insecure
-	}
+	httpClient := newHTTPClient(tlsConfig, r.allowLoopback)
+	defer httpClient.CloseIdleConnections()
 	return probe(ctx, httpClient, base, token), nil
 }
 
@@ -177,6 +191,38 @@ func decodeParameters(dst *monitoringv1alpha1.MonitoringDestination) (destinatio
 		return params, fmt.Errorf("invalid parameters: %w", err)
 	}
 	return params, nil
+}
+
+// tlsConfig is how the probe verifies the server, from spec.tls. The string
+// says why spec.tls cannot be honoured; the probe then does not run.
+func (r *DestinationReconciler) tlsConfig(ctx context.Context, dst *monitoringv1alpha1.MonitoringDestination) (*tls.Config, string, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if dst.Spec.TLS == nil {
+		return cfg, "", nil
+	}
+	cfg.InsecureSkipVerify = dst.Spec.TLS.InsecureSkipVerify
+	if dst.Spec.TLS.CA == nil || dst.Spec.TLS.CA.SecretKeyRef == nil {
+		return cfg, "", nil
+	}
+
+	ref := dst.Spec.TLS.CA.SecretKeyRef
+	secret := &corev1.Secret{}
+	if err := r.secrets.Get(ctx, client.ObjectKey{Namespace: dst.Namespace, Name: ref.Name}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Sprintf("CA bundle key %q of Secret %q: Secret not found", ref.Key, ref.Name), nil
+		}
+		return nil, "", fmt.Errorf("get CA bundle Secret %q: %w", ref.Name, err)
+	}
+	bundle, ok := secret.Data[ref.Key]
+	if !ok {
+		return nil, fmt.Sprintf("CA bundle key %q of Secret %q: key not found", ref.Key, ref.Name), nil
+	}
+	pool, err := common.ParseCABundle(bundle)
+	if err != nil {
+		return nil, fmt.Sprintf("CA bundle key %q of Secret %q: %v", ref.Key, ref.Name, err), nil
+	}
+	cfg.RootCAs = pool
+	return cfg, "", nil
 }
 
 func (r *DestinationReconciler) destinationsOfClass(ctx context.Context, class client.Object) []reconcile.Request {
