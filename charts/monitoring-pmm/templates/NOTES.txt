@@ -8,10 +8,11 @@ It claims the MonitoringClass "{{ .Values.class.name }}" (pmm-client {{ .Values.
 To send an Instance's metrics and Query Analytics to a PMM 3 server, in the
 Instance's namespace:
 
-  1. Store a PMM 3 service-account token under the key apiKey:
-       kubectl -n <namespace> create secret generic pmm-prod-token --from-literal=apiKey=<token>
-  2. Create a MonitoringDestination of class "{{ .Values.class.name }}" with parameters.url
-     and credentialsSecretRef pmm-prod-token, and wait until it is Ready:
+  1. Store a PMM 3 service-account token under the key token:
+       kubectl -n <namespace> create secret generic pmm-prod-token --from-literal=token=<token>
+  2. Create a MonitoringDestination of class "{{ .Values.class.name }}" with spec.url and
+     authentication mode ServiceAccountToken, credentialsSecretRef pmm-prod-token,
+     and wait until it is Ready:
        kubectl -n <namespace> get monitoringdestination
   3. List the destination under the Instance's spec.monitoring.destinations[].
 

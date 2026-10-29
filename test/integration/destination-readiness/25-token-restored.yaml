@@ -5,4 +5,4 @@ metadata:
   name: pmm-it-token
 type: Opaque
 stringData:
-  apiKey: glsa_chainsaw-token
+  token: glsa_chainsaw-token

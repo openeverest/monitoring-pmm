@@ -68,10 +68,10 @@ curl -fsS -u admin:<password> -H 'Content-Type: application/json' \
 
 ### 2. Store the token in a Secret
 
-Create it in the namespace of the Instances to monitor, under the key `apiKey`:
+Create it in the namespace of the Instances to monitor, under the key `token`:
 
 ```sh
-kubectl -n team-a create secret generic pmm-prod-token --from-literal=apiKey=glsa_...
+kubectl -n team-a create secret generic pmm-prod-token --from-literal=token=glsa_...
 ```
 
 Several destinations, of any class, may share a Secret.
@@ -87,17 +87,22 @@ metadata:
 spec:
   classRef:
     name: pmm
-  credentialsSecretRef:
-    name: pmm-prod-token
-  parameters:
-    url: https://pmm.example.com
-    verifyTLS: true
+  url: https://pmm.example.com
+  authentication:
+    mode: ServiceAccountToken
+    credentialsSecretRef:
+      name: pmm-prod-token
 ```
 
-| Parameter | Required | Description |
+| Field | Required | Description |
 |---|---|---|
 | `url` | yes | PMM server URL, `http://` or `https://`, for example `https://pmm.example.com`. |
-| `verifyTLS` | no | Verify the server's TLS certificate when this controller checks the server. Defaults to `true`; set `false` only for a self-signed PMM server. The agents' TLS behaviour is the database operator's, not this parameter's. |
+| `authentication.mode` | yes | `ServiceAccountToken`, the class's only mode. |
+| `authentication.credentialsSecretRef` | yes | The Secret holding the token under the key `token`. |
+| `tls.ca.secretKeyRef` | no | A Secret key holding the PEM CA bundle the server certificate is verified against, for a PMM server behind a private CA. |
+| `tls.insecureSkipVerify` | no | Do not verify the server certificate. Only for a self-signed PMM server; it cannot be set together with `tls.ca`. |
+
+`tls` applies to this controller's check of the server only. pmm-client, as the database operators run it, does not verify the PMM server certificate whatever `tls` says, and every binding to a `pmm` destination reports `Configured=True` with the reason `AgentTLSNotVerified` to say so.
 
 ```sh
 kubectl -n team-a get monitoringdestination pmm-prod
@@ -128,7 +133,7 @@ spec:
 
 | Condition | Written by | Meaning |
 |---|---|---|
-| `Accepted` | OpenEverest core | The class exists, `parameters` match the class schema and the Secret carries `apiKey` (`ClassNotFound`, `InvalidParameters`, `CredentialsNotFound`). |
+| `Accepted` | OpenEverest core | The class exists, `url` is set, the mode is `ServiceAccountToken`, the Secret carries `token` and the CA bundle, if any, parses (`ClassNotFound`, `URLRequired`, `AuthModeUnsupported`, `CredentialsNotFound`, `InvalidCABundle`). |
 | `Ready` | this controller | The PMM server was reachable and the token has the Admin role. |
 
 `Ready` reasons:
@@ -136,9 +141,9 @@ spec:
 | Reason | Status | Cause |
 |---|---|---|
 | `Ready` | True | PMM 3 answered with its version and served its settings, which only the Admin role reads. |
-| `Unauthorized` | False | PMM rejected the token (HTTP 401 or 403), the token lacks the Admin role pmm-agent needs (the settings API answered 401 or 403), or there is no token to send: no `credentialsSecretRef`, the Secret does not exist or has no `apiKey` key. |
+| `Unauthorized` | False | PMM rejected the token (HTTP 401 or 403), the token lacks the Admin role pmm-agent needs (the settings API answered 401 or 403), or there is no token to send: no `authentication.credentialsSecretRef`, the Secret does not exist or has no `token` key. |
 | `UnsupportedServerVersion` | False | The server is not PMM 3 (`serverVersion` shows what it is). |
-| `InvalidParameters` | False | `parameters` cannot be decoded, or `url` is missing or not an `http://` or `https://` URL with a host. |
+| `InvalidParameters` | False | `url` is missing or not an `http://` or `https://` URL with a host, the mode is not `ServiceAccountToken`, or the CA Secret or key named by `tls.ca` is missing or not a PEM bundle. |
 | `Unreachable` | False | Connection, DNS or TLS error, an address the check refuses (see [Server check limits](#server-check-limits)), a redirect, an unexpected HTTP status, or a reply that is not a PMM version. |
 | `Pending` | Unknown | Not checked yet: the controller is not running or has not reached this destination yet. |
 
@@ -146,7 +151,7 @@ spec:
 
 ### Server check limits
 
-A destination can name any Secret in its namespace, and the check sends that Secret's `apiKey` to the destination's `url`. Creating or updating a `pmm` destination is therefore a privileged action: grant it only to those trusted with the Secrets of that namespace. The check itself is limited so that a destination cannot turn it against the cluster:
+A destination can name any Secret in its namespace, and the check sends that Secret's `token` to the destination's `url`. Creating or updating a `pmm` destination is therefore a privileged action: grant it only to those trusted with the Secrets of that namespace. The check itself is limited so that a destination cannot turn it against the cluster:
 
 - `url` must be `http://` or `https://` with a host.
 - Redirects are not followed: a 3xx reply is `Unreachable` and its message names only the target host. No HTTP proxy is used.

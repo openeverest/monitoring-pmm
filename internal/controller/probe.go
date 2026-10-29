@@ -48,7 +48,7 @@ type versionResponse struct {
 
 // newHTTPClient returns the client the probe connects with. It follows no
 // redirects, so the token is only ever sent to the destination's own URL.
-func newHTTPClient(verifyTLS, allowLoopback bool) *http.Client {
+func newHTTPClient(tlsConfig *tls.Config, allowLoopback bool) *http.Client {
 	return &http.Client{
 		Timeout: probeTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -58,10 +58,7 @@ func newHTTPClient(verifyTLS, allowLoopback bool) *http.Client {
 			DialContext:         guardedDial(&net.Dialer{Timeout: probeTimeout}, allowLoopback),
 			TLSHandshakeTimeout: probeTimeout,
 			IdleConnTimeout:     90 * time.Second,
-			TLSClientConfig: &tls.Config{
-				MinVersion:         tls.VersionTLS12,
-				InsecureSkipVerify: !verifyTLS, //nolint:gosec // verifyTLS: false is the destination owner's explicit choice
-			},
+			TLSClientConfig:     tlsConfig,
 		},
 	}
 }
@@ -108,17 +105,17 @@ func allowedAddr(addr netip.Addr, allowLoopback bool) error {
 	return nil
 }
 
-// baseURL parses the destination's url parameter.
+// baseURL parses the destination's spec.url.
 func baseURL(raw string) (*url.URL, error) {
 	if raw == "" {
-		return nil, errors.New("parameters.url is not set")
+		return nil, errors.New("spec.url is not set")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("parameters.url: %w", err)
+		return nil, fmt.Errorf("spec.url: %w", err)
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, fmt.Errorf("parameters.url %q is not an http(s) URL", raw)
+		return nil, fmt.Errorf("spec.url %q is not an http(s) URL", raw)
 	}
 	return u, nil
 }
