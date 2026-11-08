@@ -13,6 +13,7 @@ It installs the `pmm` `MonitoringClass` and its controller. Instances whose prov
 - [Kubernetes infrastructure metrics](#kubernetes-infrastructure-metrics)
 - [Chart values](#chart-values)
 - [Compatibility](#compatibility)
+- [The pmm contract module](#the-pmm-contract-module)
 - [Development](#development)
 
 ## How it works
@@ -196,15 +197,24 @@ The Secret `get` is cluster-wide, a known limit of this release (OpenEverest 2.0
 |---|---|---|---|
 | `0.1.x` | 2.0.0-dev.5 and later | 3.x | 3.8.0 |
 
+## The pmm contract module
+
+[`api/`](api) is a Go module of its own, `github.com/openeverest/monitoring-pmm/api`: the contract of the `pmm` integration. It holds the Go types of a destination's `parameters` (`DestinationParameters`) and of an Instance entry's `parameters` (`InstanceParameters`), the `ServiceAccountToken` mode and its `token` key, strict decoders (`DecodeDestination`, `DecodeInstance`) that report a parameter they do not know as `ErrUnsupportedParameter` instead of ignoring it, and the OpenAPI schemas of both types (`DestinationParametersSchema()`, `InstanceParametersSchema()`).
+
+The class's `destinationParametersSchema` and `instanceParametersSchema` are generated from those types, so what the class admits and what a provider decodes cannot drift. Providers import the module; it depends only on the apiextensions types, resource quantities and `sigs.k8s.io/yaml`, not on this controller, OpenEverest core or controller-runtime.
+
 ## Development
 
 ```sh
 make build              # bin/controller
-make test-unit          # unit tests
-make lint               # golangci-lint
-make generate           # ClusterRole from the kubebuilder markers in internal/controller/rbac.go
+make test-unit          # unit tests, of the controller and of api/
+make lint               # golangci-lint, of the controller and of api/
+make generate           # ClusterRole from the kubebuilder markers in internal/controller/rbac.go,
+                        # and the parameter schemas of api/ into api/ and charts/monitoring-pmm/generated/
 make helm-lint helm-template
 ```
+
+`make generate` renders the schemas with the class generator of OpenEverest core (`go run github.com/openeverest/openeverest/v2/pkg/classgen/cmd@<version>`, pinned in `api/schema.go`). `make verify`, run by CI, fails when a generated file is out of date.
 
 Integration tests (chainsaw) run the chart against a fake PMM server in k3d. The cluster holds only the OpenEverest CRDs, taken from the core module version pinned in `go.mod`, not core itself:
 

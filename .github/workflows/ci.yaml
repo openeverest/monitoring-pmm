@@ -32,6 +32,12 @@ jobs:
         with:
           version: v2.14.0
 
+      - name: Lint the contract module
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+          working-directory: api
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -50,8 +56,9 @@ jobs:
       - name: Check go.mod and go.sum are tidy
         run: |
           go mod tidy
-          git diff --exit-code -- go.mod go.sum \
-            || { echo '::error::go.mod or go.sum is not tidy. Run go mod tidy and commit the result.'; exit 1; }
+          (cd api && go mod tidy)
+          git diff --exit-code -- go.mod go.sum api/go.mod api/go.sum \
+            || { echo '::error::go.mod or go.sum is not tidy. Run go mod tidy (also in api/) and commit the result.'; exit 1; }
 
   test-unit:
     name: Unit tests
