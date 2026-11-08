@@ -38,7 +38,7 @@ spec:
           args:
             - --health-probe-bind-address=:8081
             - --zap-log-level={{ .Values.logLevel }}
-            - --class-name={{ .Values.class.name }}
+            - --controller-name={{ required "class.controllerName is required: the controller that claims the class, e.g. openeverest.io/monitoring-pmm" .Values.class.controllerName }}
             {{- if .Values.probe.allowLoopback }}
             - --probe-allow-loopback
             {{- end }}

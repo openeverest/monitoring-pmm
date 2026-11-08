@@ -147,9 +147,9 @@ jobs:
       - name: Lint Helm chart
         run: helm lint charts/monitoring-pmm
 
-      - name: Verify the agent image is required
+      - name: Verify the agent image and the controller name are required
         run: |
-          for value in class.agentImage class.agentVersion; do
+          for value in class.agentImage class.agentVersion class.controllerName; do
             if out=$(helm template test charts/monitoring-pmm --set "$value=" 2>&1); then
               echo "::error::the chart renders with an empty $value"
               exit 1
