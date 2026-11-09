@@ -98,7 +98,7 @@ spec:
 
 | Field | Required | Description |
 |---|---|---|
-| `parameters.url` | yes | PMM server URL, `http://` or `https://`, for example `https://pmm.example.com`, without user information. |
+| `parameters.url` | yes | PMM server URL, `http://` or `https://`, for example `https://pmm.example.com`, without user information, path, query or fragment: the providers pass only its host and port to the database operators. |
 | `authentication.mode` | yes | `ServiceAccountToken`, the class's only mode. |
 | `authentication.credentialsSecretRef` | yes | The Secret holding the token under the key `token`. |
 | `tls.ca.secretKeyRef` | no | A Secret key holding the PEM CA bundle the server certificate is verified against, for a PMM server behind a private CA. |
@@ -202,6 +202,8 @@ The Secret `get` is cluster-wide, a known limit of this release (OpenEverest 2.0
 [`api/`](api) is a Go module of its own, `github.com/openeverest/monitoring-pmm/api`: the contract of the `pmm` integration. It holds the Go types of a destination's `parameters` (`DestinationParameters`) and of an Instance entry's `parameters` (`InstanceParameters`), the `ServiceAccountToken` mode and its `token` key, strict decoders (`DecodeDestination`, `DecodeInstance`) that report a parameter they do not know as `ErrUnsupportedParameter` instead of ignoring it, and the OpenAPI schemas of both types (`DestinationParametersSchema()`, `InstanceParametersSchema()`).
 
 The class's `destinationParametersSchema` and `instanceParametersSchema` are generated from those types, so what the class admits and what a provider decodes cannot drift. Providers import the module; it depends only on the apiextensions types, resource quantities and `sigs.k8s.io/yaml`, not on this controller, OpenEverest core or controller-runtime.
+
+The two schemas are also files at the module root, `zz_generated.destination-parameters.yaml` and `zz_generated.instance-parameters.yaml`. A provider built with provider-sdk publishes them on its `Provider` (`spec.monitoring.integrations.pmm.destinationParametersSchema` and `instanceParametersSchema`) by declaring `contractModule: github.com/openeverest/monitoring-pmm/api` for the integration in `definition/monitoring.yaml`: provider-sdk reads those files from the version of the module in the provider's `go.mod`. Keep their names and location.
 
 ## Development
 

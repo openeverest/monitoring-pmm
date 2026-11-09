@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package pmm
 
 import (
 	_ "embed"
@@ -24,7 +24,8 @@ import (
 
 // The schemas are generated from the types with the class generator of the
 // OpenEverest core module; make generate runs it and copies them into the
-// chart, whose MonitoringClass publishes them.
+// chart, whose MonitoringClass publishes them. provider-sdk reads the two
+// files by name at the module root, so keep their names and location.
 //
 //go:generate -command classgen go run github.com/openeverest/openeverest/v2/pkg/classgen/cmd@v2.0.0-dev.2.0.20261108230303-18ed25cba3bb --package .
 //go:generate classgen --type DestinationParameters --output zz_generated.destination-parameters.yaml

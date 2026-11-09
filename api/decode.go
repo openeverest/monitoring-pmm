@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package pmm
 
 import (
 	"bytes"
@@ -41,7 +41,7 @@ var (
 
 // urlPattern is the pattern of DestinationParameters.URL, as its marker
 // declares it.
-var urlPattern = regexp.MustCompile(`^https?://[^/?#@]+([/?#].*)?$`)
+var urlPattern = regexp.MustCompile(`^https?://[^/?#@]+/?$`)
 
 // DecodeDestination decodes the raw spec.parameters of a pmm
 // MonitoringDestination strictly: a key the contract does not know is
@@ -56,7 +56,7 @@ func DecodeDestination(raw []byte) (DestinationParameters, error) {
 		return DestinationParameters{}, fmt.Errorf("%w: url is required", ErrInvalidParameters)
 	}
 	if !urlPattern.MatchString(p.URL) {
-		return DestinationParameters{}, fmt.Errorf("%w: url %q must be an http:// or https:// URL without user information",
+		return DestinationParameters{}, fmt.Errorf("%w: url %q must be an http:// or https:// URL without user information, path, query or fragment",
 			ErrInvalidParameters, p.URL,
 		)
 	}

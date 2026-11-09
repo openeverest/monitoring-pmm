@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package api is the contract of the pmm monitoring integration: the Go types
+// Package pmm is the contract of the pmm monitoring integration: the Go types
 // of the parameters of a pmm MonitoringDestination and of an Instance's entry
 // for one, the integration's authentication mode and its credentials key,
 // strict decoders, and the OpenAPI v3 schemas of the parameters, generated
@@ -23,10 +23,11 @@
 // The package is a module of its own and imports only the standard library,
 // the apiextensions v1 types, resource quantities and sigs.k8s.io/yaml (a
 // test enforces it), so providers depend on it without depending on this
-// repository's controller. Import it as pmmapi:
+// repository's controller. The package is named pmm and its import path
+// ends in api, so importers name it:
 //
-//	import pmmapi "github.com/openeverest/monitoring-pmm/api"
-package api
+//	import pmm "github.com/openeverest/monitoring-pmm/api"
+package pmm
 
 import "k8s.io/apimachinery/pkg/api/resource"
 
@@ -46,9 +47,13 @@ const KeyToken = "token"
 
 // DestinationParameters are the parameters of a pmm MonitoringDestination,
 // its spec.parameters.
+//
+// URL names the server only: the providers give its host and port to the
+// operators, which have nowhere to put a path, so a path, query or fragment
+// is invalid. A trailing slash is allowed.
 type DestinationParameters struct {
 	// PMM Server URL, for example https://pmm.example.com, without user information.
-	// +kubebuilder:validation:Pattern=`^https?://[^/?#@]+([/?#].*)?$`
+	// +kubebuilder:validation:Pattern=`^https?://[^/?#@]+/?$`
 	URL string `json:"url"`
 }
 

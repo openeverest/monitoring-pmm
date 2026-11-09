@@ -3,7 +3,7 @@ properties:
   url:
     description: PMM Server URL, for example https://pmm.example.com, without user
       information.
-    pattern: ^https?://[^/?#@]+([/?#].*)?$
+    pattern: ^https?://[^/?#@]+/?$
     type: string
 required:
 - url
