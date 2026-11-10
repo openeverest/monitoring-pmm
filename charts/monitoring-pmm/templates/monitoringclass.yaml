@@ -13,43 +13,17 @@ spec:
     agentImage: {{ required "class.agentImage is required: the pmm-client image the providers run next to each database, e.g. percona/pmm-client:3.8.0" .Values.class.agentImage | quote }}
     agentVersion: {{ required "class.agentVersion is required: the version of class.agentImage, e.g. 3.8.0" .Values.class.agentVersion | quote }}
   destinationParametersSchema:
+    # Generated from the pmm contract's Go types in api/; run `make generate`.
     openAPIV3Schema:
-      type: object
-      required: [url]
-      properties:
-        url:
-          type: string
-          pattern: '^https?://[^/?#@]+([/?#].*)?$'
-          description: PMM Server URL, for example https://pmm.example.com, without user information.
+      {{- .Files.Get "generated/destination-parameters-schema.yaml" | trim | nindent 6 }}
   authModes:
     - name: ServiceAccountToken
       credentials:
         required: [token]
   instanceParametersSchema:
+    # Generated from the pmm contract's Go types in api/; run `make generate`.
     openAPIV3Schema:
-      type: object
-      properties:
-        resources:
-          type: object
-          description: Resource requirements of the pmm-client container.
-          additionalProperties: false
-          properties:
-            limits:
-              type: object
-              additionalProperties:
-                anyOf:
-                  - type: integer
-                  - type: string
-                pattern: '^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$'
-                x-kubernetes-int-or-string: true
-            requests:
-              type: object
-              additionalProperties:
-                anyOf:
-                  - type: integer
-                  - type: string
-                pattern: '^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$'
-                x-kubernetes-int-or-string: true
+      {{- .Files.Get "generated/instance-parameters-schema.yaml" | trim | nindent 6 }}
   uiSchema:
     destination:
       componentsOrder: [url]

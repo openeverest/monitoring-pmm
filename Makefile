@@ -25,6 +25,11 @@ AGENT_VERSION ?= 3.8.0
 # Helm chart directory
 CHART_DIR ?= charts/monitoring-pmm
 
+# The pmm contract module. The chart's MonitoringClass publishes the parameter
+# schemas generated from its Go types.
+API_DIR ?= api
+API_SCHEMAS = destination-parameters instance-parameters
+
 # Namespace the extension is installed into
 NAMESPACE ?= openeverest-system
 
@@ -46,12 +51,14 @@ help: ## Display this help.
 ##@ Development
 
 .PHONY: lint
-lint: ## Run golangci-lint.
+lint: ## Run golangci-lint on the controller and the contract module.
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+	cd $(API_DIR) && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
 
 .PHONY: test-unit
-test-unit: ## Run Go unit tests.
+test-unit: ## Run Go unit tests of the controller and the contract module.
 	go test -race -coverprofile=coverage.out ./...
+	cd $(API_DIR) && go test -race -coverprofile=coverage.out ./...
 
 .PHONY: run
 run: ## Run the controller against the current kubeconfig.
@@ -67,17 +74,24 @@ manifests: controller-gen ## Generate the ClusterRole from kubebuilder RBAC mark
 helm-sync-rbac: yq ## Sync the generated RBAC rules into the Helm chart.
 	@$(YQ) '.rules' config/rbac/role.yaml > $(CHART_DIR)/generated/rbac-rules.yaml
 
+.PHONY: generate-api
+generate-api: ## Generate the contract's parameter schemas from its Go types and sync them into the chart.
+	cd $(API_DIR) && go generate ./...
+	@for s in $(API_SCHEMAS); do \
+		cp $(API_DIR)/zz_generated.$$s.yaml $(CHART_DIR)/generated/$$s-schema.yaml; \
+	done
+
 .PHONY: generate
-generate: manifests helm-sync-rbac ## Run all code generation.
+generate: manifests helm-sync-rbac generate-api ## Run all code generation.
 
 .PHONY: verify
 verify: ## Verify that generated files are up-to-date (for CI).
 	@$(MAKE) generate
-	@if git diff --quiet -- config/ $(CHART_DIR)/generated/; then \
+	@if git diff --quiet -- config/ $(CHART_DIR)/generated/ $(API_DIR)/; then \
 		echo "Generated files are up-to-date."; \
 	else \
 		echo "ERROR: Generated files are out of date. Run 'make generate' and commit the changes."; \
-		git diff -- config/ $(CHART_DIR)/generated/; \
+		git diff -- config/ $(CHART_DIR)/generated/ $(API_DIR)/; \
 		exit 1; \
 	fi
 
