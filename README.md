@@ -20,7 +20,7 @@ It installs the `pmm` `MonitoringClass` and its controller. Instances whose prov
 
 `pmm` is a **ProviderManaged** class: the database provider renders the engine operator's native PMM integration itself, so nothing in this repository touches database pods. This controller only validates the PMM server and token behind each destination and, through the class, owns the pmm-client image the providers run.
 
-- **This controller** claims the MonitoringClass named by `class.name` (`--class-name`) and sets `Accepted=True` on it; any other class is left unclaimed. It keeps the `Ready` condition and `status.serverVersion` of every destination of that class current by calling the PMM server's version API and its settings API, which only the Admin role reads, with the destination's token. It re-checks a `Ready` destination every 5 minutes. A failing one is re-checked after as long as it has been failing, at least every minute and at most every 5 minutes. Those periodic checks also pick up a rotated token; a change to the destination or the class re-checks it immediately.
+- **This controller** claims every MonitoringClass whose `spec.controllerName` is its `--controller-name` (`class.controllerName`, default `openeverest.io/monitoring-pmm`) and sets `Accepted=True` on it; any other class is left unclaimed. It keeps the `Ready` condition and `status.serverVersion` of every destination of those classes current by calling the PMM server's version API and its settings API, which only the Admin role reads, with the destination's token. It re-checks a `Ready` destination every 5 minutes. A failing one is re-checked after as long as it has been failing, at least every minute and at most every 5 minutes. Those periodic checks also pick up a rotated token; a change to the destination or the class re-checks it immediately.
 - **The provider** renders pmm-client for every Instance entry that points at a `pmm` destination: the image is the class's `agentImage`, the server is the destination's `parameters.url`, the token is copied from the destination Secret into the secret the Percona operator reads it from, and the container resources are the Instance size tier merged with the entry's `parameters.resources`. The Percona operator then runs pmm-client as a sidecar of the database pods, which registers them with PMM (metrics and Query Analytics). Adding, removing or changing the agent restarts the database pods one at a time.
 - **provider-runtime** reports whether that worked on the `MonitoringBinding` (`Configured`) and in the Instance's `MonitoringConfigured` condition.
 
@@ -175,7 +175,8 @@ This extension sends database metrics and Query Analytics to PMM. Kubernetes inf
 | `class.agentImage` | `percona/pmm-client:3.8.0` | **Required.** pmm-client image the providers run next to each database. Changing it restarts the database pods of every Instance sending to a destination of this class. |
 | `class.agentVersion` | `3.8.0` | **Required.** Version of `class.agentImage`, matched against the pmm-client versions each provider supports. |
 | `class.create` | `true` | Install the `MonitoringClass`. |
-| `class.name` | `pmm` | Name of the class destinations reference, and the only class the controller claims. |
+| `class.name` | `pmm` | Name of the class destinations reference. |
+| `class.controllerName` | `openeverest.io/monitoring-pmm` | **Required.** `controllerName` of the class and the controller's `--controller-name`; the controller claims every class that names it. |
 | `class.displayName` | `Percona Monitoring and Management` | Name the UI shows for the class. |
 | `image.repository` | `ghcr.io/openeverest/monitoring-pmm` | Controller image. |
 | `image.tag` | chart `appVersion` | Controller image tag. |

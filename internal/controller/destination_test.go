@@ -105,6 +105,10 @@ func crdTypeConverter(t *testing.T) managedfields.TypeConverter { //nolint:iretu
 	return tc
 }
 
+// testControllerName is the controller name the controller under test
+// claims classes by.
+const testControllerName = "openeverest.io/monitoring-pmm"
+
 func pmmClass() *monitoringv1alpha1.MonitoringClass {
 	return pmmClassNamed("pmm")
 }
@@ -113,6 +117,7 @@ func pmmClassNamed(name string) *monitoringv1alpha1.MonitoringClass {
 	return &monitoringv1alpha1.MonitoringClass{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringClassSpec{
+			ControllerName:  testControllerName,
 			ProviderManaged: &monitoringv1alpha1.ProviderManagedFulfilment{Integration: "pmm"},
 			AuthModes: []common.AuthMode{{
 				Name:        "ServiceAccountToken",
@@ -126,6 +131,7 @@ func prometheusClass() *monitoringv1alpha1.MonitoringClass {
 	return &monitoringv1alpha1.MonitoringClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "prometheus", Generation: 1},
 		Spec: monitoringv1alpha1.MonitoringClassSpec{
+			ControllerName:   "openeverest.io/monitoring-prometheus",
 			ExtensionManaged: &monitoringv1alpha1.ExtensionManagedFulfilment{},
 			AuthModes:        []common.AuthMode{{Name: common.AuthModeAnonymous}},
 		},
@@ -202,7 +208,7 @@ func serve(t *testing.T, h http.Handler) string {
 // reconcile serves the pmm class; httptest servers listen on loopback.
 func reconcile(t *testing.T, c client.Client) (ctrl.Result, *monitoringv1alpha1.MonitoringDestination) {
 	t.Helper()
-	return reconcileWith(t, c, controller.Options{ClassName: "pmm", AllowLoopback: true})
+	return reconcileWith(t, c, controller.Options{ControllerName: testControllerName, AllowLoopback: true})
 }
 
 func reconcileWith(t *testing.T, c client.Client, opts controller.Options) (ctrl.Result, *monitoringv1alpha1.MonitoringDestination) {
@@ -504,7 +510,7 @@ func TestDestinationProbeRefusesAddresses(t *testing.T) {
 			t.Parallel()
 			c := newFakeClient(t, pmmClass(), destination("pmm", tt.url(t)), tokenSecret("token", testToken))
 
-			res, dst := reconcileWith(t, c, controller.Options{ClassName: "pmm"})
+			res, dst := reconcileWith(t, c, controller.Options{ControllerName: testControllerName})
 
 			ready := readyCondition(t, dst)
 			assert.Equal(t, string(monitoringv1alpha1.ReasonUnreachable), ready.Reason)
@@ -520,7 +526,7 @@ func TestDestinationProbeReachesLoopbackWhenAllowed(t *testing.T) {
 	url := strings.Replace(serve(t, pmmServer("3.8.0")), "127.0.0.1", "localhost", 1)
 	c := newFakeClient(t, pmmClass(), destination("pmm", url), tokenSecret("token", testToken))
 
-	_, dst := reconcileWith(t, c, controller.Options{ClassName: "pmm", AllowLoopback: true})
+	_, dst := reconcileWith(t, c, controller.Options{ControllerName: testControllerName, AllowLoopback: true})
 
 	assert.Equal(t, string(monitoringv1alpha1.ReasonReady), readyCondition(t, dst).Reason)
 	assert.Equal(t, "3.8.0", dst.Status.ServerVersion)
@@ -682,7 +688,7 @@ func TestDestinationOfOtherClassIsLeftAlone(t *testing.T) {
 		name  string
 		class string
 	}{
-		{name: "destination of another class", class: "prometheus"},
+		{name: "destination of a class of another controller", class: "prometheus"},
 		{name: "class not installed", class: "datadog"},
 	}
 	for _, tt := range tests {
@@ -696,4 +702,15 @@ func TestDestinationOfOtherClassIsLeftAlone(t *testing.T) {
 			assert.Empty(t, dst.Status.ServerVersion)
 		})
 	}
+}
+
+func TestDestinationOfEveryClaimedClassIsProbed(t *testing.T) {
+	t.Parallel()
+	c := newFakeClient(t, pmmClass(), pmmClassNamed("pmm-eu"),
+		destination("pmm-eu", serve(t, pmmServer("3.8.0"))), tokenSecret("token", testToken))
+
+	_, dst := reconcile(t, c)
+
+	assert.Equal(t, string(monitoringv1alpha1.ReasonReady), readyCondition(t, dst).Reason)
+	assert.Equal(t, "3.8.0", dst.Status.ServerVersion)
 }

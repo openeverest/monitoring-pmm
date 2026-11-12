@@ -6,6 +6,7 @@ metadata:
   labels:
     {{- include "monitoring-pmm.labels" . | nindent 4 }}
 spec:
+  controllerName: {{ required "class.controllerName is required: the controller that claims the class, e.g. openeverest.io/monitoring-pmm" .Values.class.controllerName | quote }}
   displayName: {{ .Values.class.displayName | quote }}
   description: Percona Monitoring and Management 3. The database provider runs pmm-client next to each database and registers it with the PMM server (metrics and Query Analytics). pmm-client does not verify the PMM server certificate (bindings report AgentTLSNotVerified); a destination's spec.tls applies only to this controller's check of the server.
   providerManaged:

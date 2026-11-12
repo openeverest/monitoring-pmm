@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package controller claims the MonitoringClass monitoring-pmm is configured
-// to serve and keeps the Ready condition and serverVersion of its
+// Package controller claims the MonitoringClasses that name monitoring-pmm's
+// controller and keeps the Ready condition and serverVersion of their
 // MonitoringDestinations current by probing the PMM server behind each one.
 // Rendering pmm-client into the engine pods is the providers' job.
 package controller
@@ -36,21 +36,25 @@ const FieldOwner = "openeverest.io/monitoring-pmm"
 
 // Options configures the controllers.
 type Options struct {
-	// ClassName is the one MonitoringClass this controller claims and serves.
-	ClassName string
+	// ControllerName is the controller name this controller claims
+	// MonitoringClasses by: it serves every class whose spec.controllerName
+	// equals it.
+	ControllerName string
 	// AllowLoopback lets the probe connect to loopback addresses.
 	AllowLoopback bool
 }
 
-// ClassReconciler sets Accepted on the configured MonitoringClass.
+// ClassReconciler sets Accepted on every MonitoringClass naming the
+// controller.
 type ClassReconciler struct {
 	classes monitoring.ClassController
 }
 
-// NewClassReconciler returns a ClassReconciler claiming className through c.
-func NewClassReconciler(c client.Client, className string) *ClassReconciler {
+// NewClassReconciler returns a ClassReconciler claiming, through c, the
+// classes whose controllerName is controllerName.
+func NewClassReconciler(c client.Client, controllerName string) *ClassReconciler {
 	return &ClassReconciler{
-		classes: monitoring.ClassController{Client: c, FieldOwner: FieldOwner, ClassName: className},
+		classes: monitoring.ClassController{Client: c, FieldOwner: FieldOwner, ControllerName: controllerName},
 	}
 }
 
@@ -69,8 +73,8 @@ func (r *ClassReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// Reconcile claims the configured class; a failed claim is retried with
-// backoff. Any other class stays unclaimed.
+// Reconcile claims a class naming the controller; a failed claim is retried
+// with backoff. Any other class stays unclaimed.
 func (r *ClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	class := &monitoringv1alpha1.MonitoringClass{}
 	if err := r.classes.Client.Get(ctx, req.NamespacedName, class); err != nil {
@@ -81,7 +85,7 @@ func (r *ClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 // Setup registers both controllers with the manager.
 func Setup(mgr ctrl.Manager, opts Options) error {
-	if err := NewClassReconciler(mgr.GetClient(), opts.ClassName).SetupWithManager(mgr); err != nil {
+	if err := NewClassReconciler(mgr.GetClient(), opts.ControllerName).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	return NewDestinationReconciler(mgr.GetClient(), mgr.GetAPIReader(), opts).SetupWithManager(mgr)

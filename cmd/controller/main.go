@@ -13,15 +13,16 @@
 // limitations under the License.
 
 // Command monitoring-pmm is the ProviderManaged MonitoringClass controller for
-// Percona Monitoring and Management: it claims its configured class and keeps
-// the Ready condition and serverVersion of that class's MonitoringDestinations
-// current.
+// Percona Monitoring and Management: it claims every class naming its
+// controller and keeps the Ready condition and serverVersion of those
+// classes' MonitoringDestinations current.
 // Rendering pmm-client into the engine pods is done by the providers.
 package main
 
 import (
 	"flag"
 	"os"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -37,13 +38,14 @@ import (
 )
 
 func main() {
-	var metricsAddr, probeAddr, className string
+	var metricsAddr, probeAddr, controllerName string
 	var leaderElect, allowLoopback bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "Metrics endpoint bind address ('0' disables it).")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe endpoint bind address.")
-	flag.StringVar(&className, "class-name", "pmm", "Name of the MonitoringClass this controller claims and serves.")
+	flag.StringVar(&controllerName, "controller-name", "openeverest.io/monitoring-pmm",
+		"Controller name this controller claims MonitoringClasses by: it serves every class whose spec.controllerName equals it.")
 	flag.BoolVar(&allowLoopback, "probe-allow-loopback", false, "Let the PMM server probe connect to loopback addresses.")
-	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election; the lease is named after the class.")
+	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election; the lease is named after the controller name.")
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -58,7 +60,7 @@ func main() {
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
-		LeaderElectionID:       className + ".monitoring-pmm.openeverest.io",
+		LeaderElectionID:       leaseName(controllerName),
 	})
 	if err != nil {
 		ctrl.Log.Error(err, "unable to start manager")
@@ -72,7 +74,7 @@ func main() {
 		ctrl.Log.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
-	if err := controller.Setup(mgr, controller.Options{ClassName: className, AllowLoopback: allowLoopback}); err != nil {
+	if err := controller.Setup(mgr, controller.Options{ControllerName: controllerName, AllowLoopback: allowLoopback}); err != nil {
 		ctrl.Log.Error(err, "unable to set up controller")
 		os.Exit(1)
 	}
@@ -80,4 +82,10 @@ func main() {
 		ctrl.Log.Error(err, "manager exited")
 		os.Exit(1)
 	}
+}
+
+// leaseName is the leader election lease of the controller named
+// controllerName, a DNS subdomain: "/" and "_" are not allowed in one.
+func leaseName(controllerName string) string {
+	return strings.NewReplacer("/", "-", "_", "-").Replace(controllerName) + ".monitoring-pmm.openeverest.io"
 }

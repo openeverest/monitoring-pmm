@@ -22,6 +22,7 @@ kind: MonitoringClass
 metadata:
   name: pmm
 spec:
+  controllerName: openeverest.io/monitoring-pmm
   providerManaged:
     integration: pmm
     agentImage: percona/pmm-client:3.8.0

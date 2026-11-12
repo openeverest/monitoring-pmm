@@ -69,7 +69,7 @@ type readiness struct {
 }
 
 // DestinationReconciler probes the PMM server behind every destination of
-// the class this controller serves and reports the result as the
+// the classes this controller serves and reports the result as the
 // destination's Ready condition and serverVersion.
 type DestinationReconciler struct {
 	client        client.Client
@@ -84,7 +84,7 @@ func NewDestinationReconciler(c client.Client, secrets client.Reader, opts Optio
 	return &DestinationReconciler{
 		client:        c,
 		secrets:       secrets,
-		classes:       monitoring.ClassController{Client: c, FieldOwner: FieldOwner, ClassName: opts.ClassName},
+		classes:       monitoring.ClassController{Client: c, FieldOwner: FieldOwner, ControllerName: opts.ControllerName},
 		allowLoopback: opts.AllowLoopback,
 	}
 }
@@ -109,8 +109,9 @@ func (r *DestinationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.client.Get(ctx, req.NamespacedName, dst); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if dst.Spec.ClassRef.Name != r.classes.ClassName {
-		return ctrl.Result{}, nil
+	owned, err := r.classes.OwnsClassNamed(ctx, dst.Spec.ClassRef.Name)
+	if err != nil || !owned {
+		return ctrl.Result{}, err
 	}
 
 	ready, err := r.check(ctx, dst)
@@ -225,8 +226,9 @@ func (r *DestinationReconciler) tlsConfig(ctx context.Context, dst *monitoringv1
 	return cfg, "", nil
 }
 
-func (r *DestinationReconciler) destinationsOfClass(ctx context.Context, class client.Object) []reconcile.Request {
-	if class.GetName() != r.classes.ClassName {
+func (r *DestinationReconciler) destinationsOfClass(ctx context.Context, obj client.Object) []reconcile.Request {
+	class, ok := obj.(*monitoringv1alpha1.MonitoringClass)
+	if !ok || !r.classes.OwnsClass(class) {
 		return nil
 	}
 	list := &monitoringv1alpha1.MonitoringDestinationList{}
@@ -236,7 +238,7 @@ func (r *DestinationReconciler) destinationsOfClass(ctx context.Context, class c
 	}
 	var reqs []reconcile.Request
 	for i := range list.Items {
-		if list.Items[i].Spec.ClassRef.Name == r.classes.ClassName {
+		if list.Items[i].Spec.ClassRef.Name == class.Name {
 			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
 		}
 	}

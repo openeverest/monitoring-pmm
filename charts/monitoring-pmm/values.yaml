@@ -19,11 +19,15 @@ serviceAccount:
 rbac:
   create: true
 
-# The MonitoringClass this extension claims. The class is cluster-scoped and
-# installed by this chart; destinations reference it by name.
+# The MonitoringClass this chart installs. The class is cluster-scoped;
+# destinations reference it by name. The controller claims every class whose
+# controllerName is class.controllerName (--controller-name).
 class:
   create: true
   name: pmm
+  # -- (required) controllerName of the class and the controller's
+  # --controller-name.
+  controllerName: openeverest.io/monitoring-pmm
   displayName: Percona Monitoring and Management
   # -- (required) pmm-client image the providers run next to each database.
   # Changing it rolls the database pods of every Instance that sends to a
