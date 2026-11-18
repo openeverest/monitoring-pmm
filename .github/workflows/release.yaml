@@ -98,7 +98,7 @@ jobs:
           \`\`\`bash
           helm install monitoring-pmm \\
             oci://${REGISTRY}/${OWNER}/charts/monitoring-pmm \\
-            --version ${VERSION} -n openeverest-system
+            --version ${VERSION} -n everest-system
           \`\`\`
           EOF
 
