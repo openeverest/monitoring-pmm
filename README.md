@@ -37,7 +37,7 @@ PMM 3 only: a PMM 2 server is reported as `UnsupportedServerVersion`.
 ## Install
 
 ```sh
-helm install monitoring-pmm oci://ghcr.io/openeverest/charts/monitoring-pmm -n openeverest-system \
+helm install monitoring-pmm oci://ghcr.io/openeverest/charts/monitoring-pmm -n everest-system \
   --set class.agentImage=percona/pmm-client:3.8.0 \
   --set class.agentVersion=3.8.0
 kubectl get monitoringclass pmm   # ACCEPTED shows Accepted once the controller has claimed the class

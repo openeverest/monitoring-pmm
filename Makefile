@@ -31,7 +31,7 @@ API_DIR ?= api
 API_SCHEMAS = destination-parameters instance-parameters
 
 # Namespace the extension is installed into
-NAMESPACE ?= openeverest-system
+NAMESPACE ?= everest-system
 
 # k3d cluster used by the integration tests
 K3D_CLUSTER_NAME ?= monitoring-pmm-test
