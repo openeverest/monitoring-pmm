@@ -27,6 +27,12 @@ import (
 // chart, whose MonitoringClass publishes them. provider-sdk reads the two
 // files by name at the module root, so keep their names and location.
 //
+// The generator runs with go run rather than as a tool of this module: a
+// tool requirement is part of the module graph, so its core would become a
+// minimum for every provider that imports this module, and no released core
+// has `go tool classgen` yet. With the first that does, this module requires
+// it as a tool at that release and runs `go tool classgen --package .`.
+//
 //go:generate -command classgen go run github.com/openeverest/openeverest/v2/pkg/classgen/cmd@v2.0.0-dev.2.0.20261109211638-f8f6240f45bf --package .
 //go:generate classgen --type DestinationParameters --output zz_generated.destination-parameters.yaml
 //go:generate classgen --type InstanceParameters --output zz_generated.instance-parameters.yaml

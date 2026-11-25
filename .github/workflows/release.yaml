@@ -64,8 +64,47 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
+      # For `go tool classgen`, which runs against the core in go.mod. No
+      # cache: this job can write releases and packages.
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
       - name: Stamp chart version and image
         run: make -C "$CHART_DIR" release VERSION="$VERSION" IMAGE_PREFIX="$REGISTRY/${{ github.repository_owner }}"
+
+      # A release tells users the oldest OpenEverest it works with, so its
+      # stamp must be the contract version of a released OpenEverest.
+      - name: Verify the chart's contract stamp
+        run: go tool classgen verify --chart-dir "$CHART_DIR" --release
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # classgen verify checked that the stamp is the contract version of the
+      # core go.mod requires; the controller in the image must link that core.
+      - name: Verify the image links the core the chart is stamped for
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/monitoring-pmm:${{ steps.version.outputs.version }}
+          CORE: github.com/openeverest/openeverest/v2
+        run: |
+          docker create --name controller "$IMAGE" >/dev/null
+          docker cp controller:/controller controller-bin
+          docker rm controller >/dev/null
+          linked=$(go version -m controller-bin | awk -v core="$CORE" '$1 == "dep" && $2 == core { print $3 }')
+          required=$(go list -m -f '{{.Version}}' "$CORE")
+          rm -f controller-bin
+          if [ "$linked" != "$required" ]; then
+            echo "::error::$IMAGE links $CORE ${linked:-(none)}, but go.mod requires $required, the core the chart is stamped for."
+            exit 1
+          fi
+          echo "$IMAGE links $CORE $linked, the core the chart is stamped for."
 
       - name: Package Helm chart
         run: |
