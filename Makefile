@@ -81,19 +81,29 @@ generate-api: ## Generate the contract's parameter schemas from its Go types and
 		cp $(API_DIR)/zz_generated.$$s.yaml $(CHART_DIR)/generated/$$s-schema.yaml; \
 	done
 
+.PHONY: stamp
+stamp: ## Stamp the chart with the contract version of the OpenEverest core in go.mod.
+	go tool classgen stamp --chart-dir $(CHART_DIR)
+
 .PHONY: generate
-generate: manifests helm-sync-rbac generate-api ## Run all code generation.
+generate: manifests helm-sync-rbac generate-api stamp ## Run all code generation.
+
+# What make generate writes.
+GENERATED = config/ $(API_DIR)/ $(CHART_DIR)/generated/ $(CHART_DIR)/Chart.yaml \
+	$(CHART_DIR)/templates/_openeverest_contract.tpl
 
 .PHONY: verify
-verify: ## Verify that generated files are up-to-date (for CI).
+verify: ## Verify that generated files and the chart's stamp are up-to-date (for CI).
 	@$(MAKE) generate
-	@if git diff --quiet -- config/ $(CHART_DIR)/generated/ $(API_DIR)/; then \
+	@if [ -z "$$(git status --porcelain -- $(GENERATED))" ]; then \
 		echo "Generated files are up-to-date."; \
 	else \
 		echo "ERROR: Generated files are out of date. Run 'make generate' and commit the changes."; \
-		git diff -- config/ $(CHART_DIR)/generated/ $(API_DIR)/; \
+		git status --short -- $(GENERATED); \
+		git diff -- $(GENERATED); \
 		exit 1; \
 	fi
+	go tool classgen verify --chart-dir $(CHART_DIR)
 
 ##@ Build
 

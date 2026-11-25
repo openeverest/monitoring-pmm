@@ -178,6 +178,7 @@ This extension sends database metrics and Query Analytics to PMM. Kubernetes inf
 | `class.name` | `pmm` | Name of the class destinations reference. |
 | `class.controllerName` | `openeverest.io/monitoring-pmm` | **Required.** `controllerName` of the class and the controller's `--controller-name`; the controller claims every class that names it. |
 | `class.displayName` | `Percona Monitoring and Management` | Name the UI shows for the class. |
+| `compatibility.acknowledge.coreVersion` | `""` | OpenEverest release on which to run this build although it does not support it, such as `2.0.0`; the MonitoringClass then carries it as `openeverest.io/compatibility-acknowledged`. See [Compatibility](#compatibility). |
 | `image.repository` | `ghcr.io/openeverest/monitoring-pmm` | Controller image. |
 | `image.tag` | chart `appVersion` | Controller image tag. |
 | `leaderElection.enabled` | `true` | Leader election (needed with more than one replica). |
@@ -198,6 +199,8 @@ The Secret `get` is cluster-wide, a known limit of this release (OpenEverest 2.0
 |---|---|---|---|
 | `0.1.x` | 2.0.0-dev.5 and later | 3.x | 3.8.0 |
 
+`Chart.yaml` and the `MonitoringClass` carry the annotation `openeverest.io/contract-version`: the contract version of the OpenEverest core this build is made against, the oldest OpenEverest it works with. OpenEverest and its installers read it to decide whether they support the build. To run the build on an OpenEverest release that does not support it, set `compatibility.acknowledge.coreVersion` to that release.
+
 ## The pmm contract module
 
 [`api/`](api) is a Go module of its own, `github.com/openeverest/monitoring-pmm/api`: the contract of the `pmm` integration. It holds the Go types of a destination's `parameters` (`DestinationParameters`) and of an Instance entry's `parameters` (`InstanceParameters`), the `ServiceAccountToken` mode and its `token` key, strict decoders (`DecodeDestination`, `DecodeInstance`) that report a parameter they do not know as `ErrUnsupportedParameter` instead of ignoring it, and the OpenAPI schemas of both types (`DestinationParametersSchema()`, `InstanceParametersSchema()`).
@@ -213,11 +216,12 @@ make build              # bin/controller
 make test-unit          # unit tests, of the controller and of api/
 make lint               # golangci-lint, of the controller and of api/
 make generate           # ClusterRole from the kubebuilder markers in internal/controller/rbac.go,
-                        # and the parameter schemas of api/ into api/ and charts/monitoring-pmm/generated/
+                        # the parameter schemas of api/ into api/ and charts/monitoring-pmm/generated/,
+                        # and the chart's contract stamp
 make helm-lint helm-template
 ```
 
-`make generate` renders the schemas with the class generator of OpenEverest core (`go run github.com/openeverest/openeverest/v2/pkg/classgen/cmd@<version>`, pinned in `api/schema.go`). `make verify`, run by CI, fails when a generated file is out of date.
+`make generate` renders the schemas with the class generator of OpenEverest core (`go run github.com/openeverest/openeverest/v2/pkg/classgen/cmd@<version>`, pinned in `api/schema.go`), then stamps the chart with `go tool classgen stamp`. classgen is a tool of the controller's module, so it runs against the core in `go.mod`, the one the controller links, and stamps that core's contract version: it writes the `openeverest.io/contract-version` annotation into `Chart.yaml`, and the helper `templates/_openeverest_contract.tpl`, which puts it on the MonitoringClass. Never edit either by hand; run `make generate` after bumping the core in `go.mod`. `make verify`, run by CI, fails when a generated file or the stamp is out of date, then runs `go tool classgen verify`, which renders the chart and checks that the MonitoringClass carries the stamp.
 
 Integration tests (chainsaw) run the chart against a fake PMM server in k3d. The cluster holds only the OpenEverest CRDs, taken from the core module version pinned in `go.mod`, not core itself:
 

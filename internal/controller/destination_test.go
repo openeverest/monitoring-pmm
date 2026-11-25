@@ -45,6 +45,7 @@ import (
 
 	common "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	monitoringv1alpha1 "github.com/openeverest/openeverest/v2/api/monitoring/v1alpha1"
+	contractmonitoring "github.com/openeverest/openeverest/v2/contract/monitoring"
 	"github.com/openeverest/openeverest/v2/provider-runtime/monitoring"
 
 	"github.com/openeverest/monitoring-pmm/internal/controller"
@@ -660,7 +661,7 @@ func TestDestinationReadyKeepsAcceptedAndServerVersion(t *testing.T) {
 	dst := &monitoringv1alpha1.MonitoringDestination{}
 	require.NoError(t, c.Get(ctx, destinationKey(), dst))
 	accepted := monitoring.NewCondition(dst, monitoringv1alpha1.MonitoringDestinationConditionAccepted, metav1.ConditionTrue, monitoringv1alpha1.ReasonAccepted, "")
-	require.NoError(t, monitoring.ApplyCondition(ctx, c, dst, dst.Status.Conditions, monitoring.MaterializerFieldOwner, accepted))
+	require.NoError(t, monitoring.ApplyCondition(ctx, c, dst, dst.Status.Conditions, contractmonitoring.MaterializerFieldOwner, accepted))
 
 	_, dst = reconcile(t, c)
 	require.Equal(t, "3.8.0", dst.Status.ServerVersion)

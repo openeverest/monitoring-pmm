@@ -5,6 +5,8 @@ metadata:
   name: {{ .Values.class.name }}
   labels:
     {{- include "monitoring-pmm.labels" . | nindent 4 }}
+  annotations:
+    {{- include "openeverest.contract.annotations" . | nindent 4 }}
 spec:
   controllerName: {{ required "class.controllerName is required: the controller that claims the class, e.g. openeverest.io/monitoring-pmm" .Values.class.controllerName | quote }}
   displayName: {{ .Values.class.displayName | quote }}
