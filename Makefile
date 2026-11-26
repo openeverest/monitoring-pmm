@@ -152,8 +152,9 @@ install-crds: ## Install the OpenEverest CRDs of the core version pinned in go.m
 
 .PHONY: deploy-ci
 deploy-ci: ## Install the chart with IMG (already imported into k3d).
+	kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+	kubectl label --overwrite namespace $(NAMESPACE) pod-security.kubernetes.io/enforce=restricted
 	helm upgrade --install monitoring-pmm $(CHART_DIR) \
-		--create-namespace \
 		--namespace $(NAMESPACE) \
 		--set image.repository=$(_IMG_REPO) \
 		--set image.tag=$(_IMG_TAG) \

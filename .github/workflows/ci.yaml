@@ -158,6 +158,17 @@ jobs:
               || { echo "::error::unexpected error for an empty $value: $out"; exit 1; }
           done
 
+      # OpenShift's restricted-v2 SCC rejects pods that pin IDs outside the
+      # namespace's range; the image's USER is enough.
+      - name: Verify the chart pins no user or group ID
+        run: |
+          for api in "" "--api-versions security.openshift.io/v1/SecurityContextConstraints"; do
+            helm template test charts/monitoring-pmm $api > /tmp/rendered.yaml
+            if grep -En '^\s*(runAsUser|runAsGroup|fsGroup):' /tmp/rendered.yaml; then
+              echo "::error::the chart pins a user or group ID ($api)"; exit 1
+            fi
+          done
+
   test-integration:
     name: Integration / destination readiness
     needs: [lint, build, test-unit, verify, helm-lint]

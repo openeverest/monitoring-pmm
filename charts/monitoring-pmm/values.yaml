@@ -56,12 +56,11 @@ probe:
 podAnnotations: {}
 podLabels: {}
 
-# Pod Security Standard "restricted"; 65532 is the image's nonroot user.
+# Pod Security Standard "restricted". No fixed runAsUser/runAsGroup/fsGroup:
+# the image runs as USER 65532:65532, and OpenShift's restricted-v2 SCC assigns
+# IDs from the namespace's range. The controller mounts no volumes.
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 65532
-  runAsGroup: 65532
-  fsGroup: 65532
   seccompProfile:
     type: RuntimeDefault
 

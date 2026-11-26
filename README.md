@@ -182,7 +182,7 @@ This extension sends database metrics and Query Analytics to PMM. Kubernetes inf
 | `image.repository` | `ghcr.io/openeverest/monitoring-pmm` | Controller image. |
 | `image.tag` | chart `appVersion` | Controller image tag. |
 | `leaderElection.enabled` | `true` | Leader election (needed with more than one replica). |
-| `podSecurityContext`, `securityContext` | Pod Security Standard `restricted`, UID 65532 | Controller pod and container security context. |
+| `podSecurityContext`, `securityContext` | Pod Security Standard `restricted`, no fixed user or group IDs | Controller pod and container security context. The image runs as `USER 65532:65532`; OpenShift's `restricted-v2` SCC assigns IDs from the namespace's range. |
 | `probe.allowLoopback` | `false` | Let the server check connect to loopback addresses such as `localhost`. Link-local addresses, which include cloud metadata endpoints, are always refused. |
 | `rbac.create` | `true` | Create the ClusterRole, the leader-election Role and their bindings. |
 | `resources` | 20m/64Mi requests, 200m/128Mi limits | Controller resources. |
